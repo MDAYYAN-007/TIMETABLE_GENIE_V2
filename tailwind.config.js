@@ -9,6 +9,8 @@ module.exports = {
     extend: {
       fontFamily: {
         sans: ["Poppins", "Lato", "sans-serif"],
+        geistsans: "var(--font-geist-sans)",
+        geistmono: "var(--font-geist-mono)",
       },
       screens: {
         'max-2xl': { 'max': '1535px' },
@@ -18,9 +20,16 @@ module.exports = {
         'max-sm': { 'max': '639px' },
         'max-xsm': { 'max': '460px' },
       },
-      fontFamily: {
-        geistsans: "var(--font-geist-sans)",
-        geistmono: "var(--font-geist-mono)",
+      animation: {
+        "float-slow": "float 6s ease-in-out infinite",
+        "float-medium": "float 4s ease-in-out infinite",
+        "float-fast": "float 2s ease-in-out infinite",
+      },
+      keyframes: {
+        float: {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-20px)" },
+        },
       },
     },
   },

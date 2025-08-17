@@ -2,31 +2,26 @@
 
 import Link from "next/link";
 import { FaHome, FaInfoCircle, FaListAlt, FaSignInAlt, FaBars, FaTimes } from "react-icons/fa";
-import { useSession, signIn, signOut } from "next-auth/react";
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { Orbitron } from "next/font/google";
+
+const orbitron = Orbitron({ subsets: ["latin"], weight: ["700"] });
 
 export default function Navbar() {
-  const { data: session, status } = useSession();
   const [menuOpen, setMenuOpen] = useState(false);
-
-  const router = useRouter();
-
-  const handleSignOut = async () => {
-    const isConfirmed = window.confirm('Are you sure you want to sign out?');
-    if (!isConfirmed) return;
-    await signOut({ redirect: false });
-    router.push("/login");
-  }
+  let status = "loading";
+  let session = null;
 
   return (
-    <nav className="navbar bg-gradient-to-r from-[#8e44ad] to-[#3498db] shadow-md fixed w-full z-10 top-0 left-0">
+    <nav className="bg-gradient-to-r from-indigo-500 via-purple-500 to-blue-500/90 backdrop-blur-sm shadow-md fixed w-full z-10 top-0 left-0">
       <div className="mx-auto px-6 py-4 flex justify-between items-center max-md:px-4 max-sm:px-2">
+        
         {/* Logo */}
-        <Link href="/" className="text-2xl font-extrabold text-white flex items-center gap-2 max-md:text-xl">
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#ff8a65] to-[#ffe0b2]">
-            Timetable Genie
-          </span>
+        <Link
+          href="/"
+          className={`${orbitron.className} text-3xl font-bold text-white tracking-wide drop-shadow-md`}
+        >
+          TimetableGenie
         </Link>
 
         {/* Mobile Menu Button */}
@@ -40,19 +35,19 @@ export default function Navbar() {
         {/* Desktop Nav Links */}
         <div className="hidden md:flex items-center space-x-6 text-lg text-white">
           <Link href="/">
-            <p className="nav-link hover:text-[#ff8a65] hover:scale-105 transform transition-all flex items-center">
+            <p className="nav-link hover:text-[#ffda77] hover:scale-105 transform transition-all flex items-center">
               <FaHome className="mr-2" />
               Home
             </p>
           </Link>
-          <Link href="/timetables">
-            <p className="nav-link hover:text-[#ff8a65] hover:scale-105 transform transition-all flex items-center">
+          <Link href="#">
+            <p className="nav-link hover:text-[#ffda77] hover:scale-105 transform transition-all flex items-center">
               <FaListAlt className="mr-2" />
               Time Tables
             </p>
           </Link>
-          <Link href="/about">
-            <p className="nav-link hover:text-[#ff8a65] hover:scale-105 transform transition-all flex items-center">
+          <Link href="#">
+            <p className="nav-link hover:text-[#ffda77] hover:scale-105 transform transition-all flex items-center">
               <FaInfoCircle className="mr-2" />
               About
             </p>
@@ -61,29 +56,29 @@ export default function Navbar() {
 
         {/* Mobile Menu */}
         {menuOpen && (
-          <div className="absolute top-16 left-0 w-full bg-[#8e44ad] shadow-lg flex flex-col items-center space-y-4 py-4 md:hidden">
+          <div className="absolute top-16 left-0 w-full bg-gradient-to-r from-indigo-500 via-purple-500 to-blue-500 shadow-lg flex flex-col items-center space-y-4 py-4 md:hidden">
             <Link href="/">
               <p
                 onClick={() => setMenuOpen(false)}
-                className="text-white text-lg hover:text-[#ff8a65] transition-all"
+                className="text-white text-lg hover:text-[#ffda77] transition-all"
               >
                 <FaHome className="inline-block mr-2" />
                 Home
               </p>
             </Link>
-            <Link href="/timetables">
+            <Link href="#">
               <p
                 onClick={() => setMenuOpen(false)}
-                className="text-white text-lg hover:text-[#ff8a65] transition-all"
+                className="text-white text-lg hover:text-[#ffda77] transition-all"
               >
                 <FaListAlt className="inline-block mr-2" />
                 Time Tables
               </p>
             </Link>
-            <Link href="/about">
+            <Link href="#">
               <p
                 onClick={() => setMenuOpen(false)}
-                className="text-white text-lg hover:text-[#ff8a65] transition-all"
+                className="text-white text-lg hover:text-[#ffda77] transition-all"
               >
                 <FaInfoCircle className="inline-block mr-2" />
                 About
@@ -99,18 +94,18 @@ export default function Navbar() {
           ) : session ? (
             <div className="group relative">
               <button
-                onClick={() => handleSignOut()}
+                // onClick={() => handleSignOut()}
                 className="flex items-center space-x-2 bg-white/20 hover:bg-white/30 px-4 py-2 max-md:px-3 max-md:py-1 rounded-lg transition-all"
               >
                 <span className="text-white">Sign Out</span>
               </button>
-              <span className="absolute left-1/2 -bottom-8 transform -translate-x-1/2 text-center text-xs text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap bg-[#8e44ad] px-2 py-1 rounded">
-                Signed in as: {session.user.email.split('@')[0]}
+              <span className="absolute left-1/2 -bottom-8 transform -translate-x-1/2 text-center text-xs text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap bg-purple-600 px-2 py-1 rounded">
+                {/* Signed in as: {session.user.email.split('@')[0]} */}
               </span>
             </div>
           ) : (
             <Link
-              href="/login"
+              href="#"
               className="flex items-center space-x-2 bg-white/20 hover:bg-white/30 px-4 py-2 max-md:px-3 max-md:py-1 rounded-lg transition-all"
             >
               <FaSignInAlt className="text-white" />
