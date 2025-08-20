@@ -22,6 +22,7 @@ import {
 } from 'react-icons/fa';
 import { IoMdSchool } from 'react-icons/io';
 import { MdOutlineClass, MdOutlineDashboard } from 'react-icons/md';
+import Link from 'next/link';
 
 const Institution = () => {
     const params = useParams();
@@ -88,6 +89,339 @@ const Institution = () => {
 
     // Search query for faculty
     const [facultySearchQuery, setFacultySearchQuery] = useState('');
+
+    // Fetch current institute and branches on mount
+    useEffect(() => {
+        // Fetch current institute
+        const storedInstitutes = JSON.parse(localStorage.getItem('institutes')) || [];
+        const found = storedInstitutes.find((inst) => inst.instituteId === id);
+        setCurrentInstitute(found);
+
+        // Fetch branches for the current institute
+        const allBranches = JSON.parse(localStorage.getItem('branches')) || [];
+        const branchesForInstitute = allBranches.filter((branch) => branch.instituteId === id);
+        setCurrentBranches(branchesForInstitute);
+
+        // Fetch faculty for the current institute
+        const storedFaculty = JSON.parse(localStorage.getItem('faculty')) || [];
+        setFaculty(storedFaculty.filter(f => f.instituteId === id));
+
+        setLoading(false);
+    }, [id]);
+
+    // Filter faculty and branches based on search queries
+    const filteredFaculty = faculty.filter(member =>
+        member.name.toLowerCase().includes(facultySearchQuery.toLowerCase())
+    );
+
+    const filteredBranches = currentBranches.filter(branch =>
+        branch.branchName.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    // Handle changes in the number of semesters
+    const handleNumSemestersChange = (value) => {
+        setNumSemesters(value);
+        if (!value) {
+            setSemestersData([]);
+            return;
+        }
+
+        const count = Number(value);
+        const newSemesters = semesterType === 'odd'
+            ? Array.from({ length: count }, (_, i) => ({ semesterName: `Semester ${i * 2 + 1}`, sections: 1 }))
+            : Array.from({ length: count }, (_, i) => ({ semesterName: `Semester ${(i + 1) * 2}`, sections: 1 }));
+        setSemestersData(newSemesters);
+    };
+
+    // Handle semester type change
+    const handleSemesterTypeChange = (type) => {
+        setSemesterType(type);
+        if (numSemesters) {
+            const count = Number(numSemesters);
+            const newSemesters = type === 'odd'
+                ? Array.from({ length: count }, (_, i) => ({ semesterName: `Semester ${i * 2 + 1}`, sections: 1 }))
+                : Array.from({ length: count }, (_, i) => ({ semesterName: `Semester ${(i + 1) * 2}`, sections: 1 }));
+            setSemestersData(newSemesters);
+        }
+    };
+
+    // Handle semester name and section changes
+    const handleSemesterNameChange = (index, value) => {
+        const updated = [...semestersData];
+        updated[index].semesterName = value;
+        setSemestersData(updated);
+    };
+
+    const handleSectionChange = (index, value) => {
+        const updated = [...semestersData];
+        updated[index].sections = value;
+        setSemestersData(updated);
+    };
+
+    // Handle branch creation
+    const handleSaveBranch = () => {
+        if (!branchName.trim()) {
+            toast.error('Branch name is required', { position: 'top-center' });
+            return;
+        }
+
+        if (!numSemesters) {
+            toast.error('Number of semesters is required', { position: 'top-center' });
+            return;
+        }
+
+        const newBranch = {
+            branchId: Date.now(),
+            branchName,
+            instituteId: id,
+            instituteName: currentInstitute.instituteName,
+            semesters: semestersData.map(sem => ({
+                ...sem,
+                sectionNames: Array.from({ length: sem.sections || 1 }, (_, i) =>
+                    `Section ${String.fromCharCode(65 + i)}`
+                ),
+                semesterId: Date.now() + Math.random().toString(36).substring(2, 8)
+            }))
+        };
+
+        const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
+        storedBranches.push(newBranch);
+        localStorage.setItem('branches', JSON.stringify(storedBranches));
+
+        const storedInstitutes = JSON.parse(localStorage.getItem('institutes')) || [];
+        const updatedInstitutes = storedInstitutes.map((inst) => {
+            if (inst.instituteId === id) {
+                if (!inst.branches) inst.branches = [];
+                inst.branches.push(branchName);
+            }
+            return inst;
+        });
+        localStorage.setItem('institutes', JSON.stringify(updatedInstitutes));
+
+        setBranchName('');
+        setNumSemesters('');
+        setSemestersData([]);
+        setIsModalOpen(false);
+
+        toast.success('Branch added successfully', { position: 'top-center' });
+        setCurrentInstitute(updatedInstitutes.find((inst) => inst.instituteId === id));
+        const allBranches = JSON.parse(localStorage.getItem('branches')) || [];
+        const branchesForInstitute = allBranches.filter((branch) => branch.instituteId === id);
+        setCurrentBranches(branchesForInstitute);
+    };
+
+    // Start editing semester
+    const startEditingSemester = (semesterName) => {
+        setEditingSemester(semesterName);
+        setNewSemesterName(semesterName);
+    };
+
+    // Cancel editing semester
+    const cancelEditingSemester = () => {
+        setEditingSemester(null);
+        setNewSemesterName('');
+    };
+
+    // Save edited semester
+    const saveEditedSemester = (branchId, oldSemesterName) => {
+        if (!newSemesterName.trim()) {
+            toast.error('Semester name cannot be empty', { position: 'top-center' });
+            return;
+        }
+
+        const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
+        const updatedBranches = storedBranches.map(branch => {
+            if (branch.branchId === branchId) {
+                const updatedSemesters = branch.semesters.map(sem =>
+                    sem.semesterName === oldSemesterName
+                        ? { ...sem, semesterName: newSemesterName }
+                        : sem
+                );
+                return { ...branch, semesters: updatedSemesters };
+            }
+            return branch;
+        });
+        localStorage.setItem('branches', JSON.stringify(updatedBranches));
+
+        setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
+        setEditingSemester(null);
+        toast.success('Semester renamed successfully', { position: 'top-center' });
+    };
+
+    // Start editing branch
+    const startEditingBranch = (branch) => {
+        setEditingBranch(branch.branchId);
+        setNewBranchName(branch.branchName);
+    };
+
+    // Cancel editing branch
+    const cancelEditingBranch = () => {
+        setEditingBranch(null);
+        setNewBranchName('');
+    };
+
+    // Save edited branch
+    const saveEditedBranch = (branchId) => {
+        if (!newBranchName.trim()) {
+            toast.error('Branch name cannot be empty', { position: 'top-center' });
+            return;
+        }
+
+        const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
+        const updatedBranches = storedBranches.map(branch => {
+            if (branch.branchId === branchId) {
+                return { ...branch, branchName: newBranchName };
+            }
+            return branch;
+        });
+        localStorage.setItem('branches', JSON.stringify(updatedBranches));
+
+        const storedInstitutes = JSON.parse(localStorage.getItem('institutes')) || [];
+        const updatedInstitutes = storedInstitutes.map(inst => {
+            if (inst.instituteId === id) {
+                const updatedBranchesList = inst.branches?.map(name =>
+                    name === currentBranches.find(b => b.branchId === branchId)?.branchName ? newBranchName : name
+                ) || [];
+                return { ...inst, branches: updatedBranchesList };
+            }
+            return inst;
+        });
+        localStorage.setItem('institutes', JSON.stringify(updatedInstitutes));
+
+        setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
+        setCurrentInstitute(updatedInstitutes.find(inst => inst.instituteId === id));
+        setEditingBranch(null);
+        toast.success('Branch renamed successfully', { position: 'top-center' });
+    };
+
+    // Delete branch
+    const deleteBranch = (branchId) => {
+        if (confirm('Are you sure you want to delete this branch? This will also delete all associated semesters and timetables.')) {
+            const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
+            const updatedBranches = storedBranches.filter(branch => branch.branchId !== branchId);
+            localStorage.setItem('branches', JSON.stringify(updatedBranches));
+
+            const storedInstitutes = JSON.parse(localStorage.getItem('institutes')) || [];
+            const updatedInstitutes = storedInstitutes.map(inst => {
+                if (inst.instituteId === id) {
+                    const branchToDelete = storedBranches.find(b => b.branchId === branchId);
+                    const updatedBranchesList = inst.branches?.filter(name => name !== branchToDelete?.branchName) || [];
+                    return { ...inst, branches: updatedBranchesList };
+                }
+                return inst;
+            });
+            localStorage.setItem('institutes', JSON.stringify(updatedInstitutes));
+
+            setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
+            setCurrentInstitute(updatedInstitutes.find(inst => inst.instituteId === id));
+            toast.success('Branch deleted successfully', { position: 'top-center' });
+        }
+    };
+
+    // Add semester to a branch
+    const addSemester = (branchId) => {
+        const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
+        const updatedBranches = storedBranches.map(branch => {
+            if (branch.branchId === branchId && branch.semesters.length < 5) {
+                const lastSemester = branch.semesters[branch.semesters.length - 1];
+                const lastNumber = parseInt(lastSemester.semesterName.split(' ')[1]);
+                const newSemester = {
+                    semesterName: `Semester ${lastNumber + 2}`,
+                    sections: 1
+                };
+                return { ...branch, semesters: [...branch.semesters, newSemester] };
+            }
+            return branch;
+        });
+        localStorage.setItem('branches', JSON.stringify(updatedBranches));
+        setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
+        toast.success('Semester added successfully', { position: 'top-center' });
+    };
+
+    // Delete semester from a branch
+    const deleteSemester = (branchId, semesterName) => {
+        if (confirm(`Are you sure you want to delete ${semesterName}? This will also delete all associated sections and timetables.`)) {
+            const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
+            const updatedBranches = storedBranches.map(branch => {
+                if (branch.branchId === branchId) {
+                    const updatedSemesters = branch.semesters.filter(sem => sem.semesterName !== semesterName);
+                    return { ...branch, semesters: updatedSemesters };
+                }
+                return branch;
+            });
+            localStorage.setItem('branches', JSON.stringify(updatedBranches));
+
+            setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
+            toast.success('Semester deleted successfully', { position: 'top-center' });
+        }
+    };
+
+    // Add section to a semester
+    const addSection = (branchId, semesterName) => {
+        const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
+        const updatedBranches = storedBranches.map(branch => {
+            if (branch.branchId === branchId) {
+                const updatedSemesters = branch.semesters.map(sem => {
+                    if (sem.semesterName === semesterName && sem.sectionNames.length < 5) {
+                        // Find all existing section letters
+                        const existingLetters = sem.sectionNames.map(name =>
+                            name.split(' ')[1].charCodeAt(0)
+                        );
+
+                        // Find the first available letter starting from A
+                        let newLetterCode = 65; // 'A'
+                        while (existingLetters.includes(newLetterCode)) {
+                            newLetterCode++;
+                        }
+
+                        const newSectionName = `Section ${String.fromCharCode(newLetterCode)}`;
+                        return {
+                            ...sem,
+                            sections: sem.sections + 1,
+                            sectionNames: [...sem.sectionNames, newSectionName]
+                        };
+                    }
+                    return sem;
+                });
+                return { ...branch, semesters: updatedSemesters };
+            }
+            return branch;
+        });
+        localStorage.setItem('branches', JSON.stringify(updatedBranches));
+        setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
+        toast.success('Section added successfully', { position: 'top-center' });
+    };
+
+    // Delete section from a semester
+    const deleteSection = (branchId, semesterName, sectionName) => {
+        const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
+        const updatedBranches = storedBranches.map(branch => {
+            if (branch.branchId === branchId) {
+                const updatedSemesters = branch.semesters.map(sem => {
+                    if (sem.semesterName === semesterName && sem.sectionNames.length > 1) {
+                        return {
+                            ...sem,
+                            sections: sem.sections - 1,
+                            sectionNames: sem.sectionNames.filter(name => name !== sectionName)
+                        };
+                    }
+                    return sem;
+                });
+                return { ...branch, semesters: updatedSemesters };
+            }
+            return branch;
+        });
+        localStorage.setItem('branches', JSON.stringify(updatedBranches));
+        setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
+        toast.success(`Section ${sectionName} deleted successfully`, { position: 'top-center' });
+    };
+
+    // Toggle branch accordion
+    const toggleBranchAccordion = (branchId) => {
+        setOpenBranchIds((prev) =>
+            prev.includes(branchId) ? prev.filter((id) => id !== branchId) : [...prev, branchId]
+        );
+    };
 
     // Faculty functions
     const handleAddTeacher = () => {
@@ -164,17 +498,19 @@ const Institution = () => {
         }
     };
 
-    // Unavailability functions
+    // Open modal to manage unavailability
     const openUnavailabilityModal = (teacher) => {
         setCurrentTeacher(JSON.parse(JSON.stringify(teacher)));
         setIsUnavailabilityModalOpen(true);
     };
 
+    // Close unavailability modal
     const closeUnavailabilityModal = () => {
         setIsUnavailabilityModalOpen(false);
         setCurrentTeacher(null);
     };
 
+    // Toggle unavailability for a specific slot
     const toggleUnavailability = (slotKey) => {
         if (currentTeacher.unavailability[slotKey]?.allocated) {
             toast.error('This slot is already allocated to a class. Cannot toggle unavailability.');
@@ -203,18 +539,21 @@ const Institution = () => {
         });
     };
 
+    // Open message modal for unavailability
     const openMessageModal = (slotKey, message) => {
         setCurrentSlot(slotKey);
         setCurrentMessage(message || '');
         setIsMessageModalOpen(true);
     };
 
+    // Close message modal for unavailability
     const closeMessageModal = () => {
         setIsMessageModalOpen(false);
         setCurrentSlot('');
         setCurrentMessage('');
     };
 
+    // Save message for unavailability
     const saveMessage = () => {
         setCurrentTeacher(prev => {
             const newUnavailability = { ...prev.unavailability };
@@ -227,6 +566,7 @@ const Institution = () => {
         closeMessageModal();
     };
 
+    // Save unavailability changes
     const saveUnavailability = () => {
         const updatedFaculty = faculty.map(teacher =>
             teacher.teacherId === currentTeacher.teacherId ? currentTeacher : teacher
@@ -238,126 +578,6 @@ const Institution = () => {
         toast.success('Unavailability updated successfully');
     };
 
-
-    useEffect(() => {
-        // Fetch current institute
-        const storedInstitutes = JSON.parse(localStorage.getItem('institutes')) || [];
-        const found = storedInstitutes.find((inst) => inst.instituteId === id);
-        setCurrentInstitute(found);
-
-        // Fetch branches for the current institute
-        const allBranches = JSON.parse(localStorage.getItem('branches')) || [];
-        const branchesForInstitute = allBranches.filter((branch) => branch.instituteId === id);
-        setCurrentBranches(branchesForInstitute);
-
-        // Fetch faculty for the current institute
-        const storedFaculty = JSON.parse(localStorage.getItem('faculty')) || [];
-        setFaculty(storedFaculty.filter(f => f.instituteId === id));
-
-        setLoading(false);
-    }, [id]);
-
-    const filteredFaculty = faculty.filter(member =>
-        member.name.toLowerCase().includes(facultySearchQuery.toLowerCase())
-    );
-
-    const filteredBranches = currentBranches.filter(branch =>
-        branch.branchName.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    const handleNumSemestersChange = (value) => {
-        setNumSemesters(value);
-        if (!value) {
-            setSemestersData([]);
-            return;
-        }
-
-        const count = Number(value);
-        const newSemesters = semesterType === 'odd'
-            ? Array.from({ length: count }, (_, i) => ({ semesterName: `Semester ${i * 2 + 1}`, sections: 1 }))
-            : Array.from({ length: count }, (_, i) => ({ semesterName: `Semester ${(i + 1) * 2}`, sections: 1 }));
-        setSemestersData(newSemesters);
-    };
-
-    const handleSemesterTypeChange = (type) => {
-        setSemesterType(type);
-        if (numSemesters) {
-            const count = Number(numSemesters);
-            const newSemesters = type === 'odd'
-                ? Array.from({ length: count }, (_, i) => ({ semesterName: `Semester ${i * 2 + 1}`, sections: 1 }))
-                : Array.from({ length: count }, (_, i) => ({ semesterName: `Semester ${(i + 1) * 2}`, sections: 1 }));
-            setSemestersData(newSemesters);
-        }
-    };
-
-    const handleSemesterNameChange = (index, value) => {
-        const updated = [...semestersData];
-        updated[index].semesterName = value;
-        setSemestersData(updated);
-    };
-
-    const handleSectionChange = (index, value) => {
-        const updated = [...semestersData];
-        updated[index].sections = value;
-        setSemestersData(updated);
-    };
-
-    const handleSaveBranch = () => {
-        if (!branchName.trim()) {
-            toast.error('Branch name is required', { position: 'top-center' });
-            return;
-        }
-
-        if (!numSemesters) {
-            toast.error('Number of semesters is required', { position: 'top-center' });
-            return;
-        }
-
-        const newBranch = {
-            branchId: Date.now(),
-            branchName,
-            instituteId: id,
-            instituteName: currentInstitute.instituteName,
-            semesters: semestersData.map(sem => ({
-                ...sem,
-                sectionNames: Array.from({ length: sem.sections || 1 }, (_, i) =>
-                    `Section ${String.fromCharCode(65 + i)}`
-                )
-            }))
-        };
-
-        const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
-        storedBranches.push(newBranch);
-        localStorage.setItem('branches', JSON.stringify(storedBranches));
-
-        const storedInstitutes = JSON.parse(localStorage.getItem('institutes')) || [];
-        const updatedInstitutes = storedInstitutes.map((inst) => {
-            if (inst.instituteId === id) {
-                if (!inst.branches) inst.branches = [];
-                inst.branches.push(branchName);
-            }
-            return inst;
-        });
-        localStorage.setItem('institutes', JSON.stringify(updatedInstitutes));
-
-        setBranchName('');
-        setNumSemesters('');
-        setSemestersData([]);
-        setIsModalOpen(false);
-
-        toast.success('Branch added successfully', { position: 'top-center' });
-        setCurrentInstitute(updatedInstitutes.find((inst) => inst.instituteId === id));
-        const allBranches = JSON.parse(localStorage.getItem('branches')) || [];
-        const branchesForInstitute = allBranches.filter((branch) => branch.instituteId === id);
-        setCurrentBranches(branchesForInstitute);
-    };
-
-    const toggleBranchAccordion = (branchId) => {
-        setOpenBranchIds((prev) =>
-            prev.includes(branchId) ? prev.filter((id) => id !== branchId) : [...prev, branchId]
-        );
-    };
-
     const navigateToSemester = (branchId, semesterName) => {
         router.push(`/institution/${id}/branch/${branchId}/semester/${encodeURIComponent(semesterName)}`);
     };
@@ -366,204 +586,7 @@ const Institution = () => {
         router.push(`/institution/${id}/branch/${branchId}/semester/${encodeURIComponent(semesterName)}/section/${section}`);
     };
 
-    const navigateToCurriculum = (branchId, semesterName) => {
-        router.push(`/institution/${id}/branch/${branchId}/semester/${encodeURIComponent(semesterName)}/curriculum`);
-    };
-
-    const startEditingSemester = (semesterName) => {
-        setEditingSemester(semesterName);
-        setNewSemesterName(semesterName);
-    };
-
-    const cancelEditingSemester = () => {
-        setEditingSemester(null);
-        setNewSemesterName('');
-    };
-
-    const saveEditedSemester = (branchId, oldSemesterName) => {
-        if (!newSemesterName.trim()) {
-            toast.error('Semester name cannot be empty', { position: 'top-center' });
-            return;
-        }
-
-        const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
-        const updatedBranches = storedBranches.map(branch => {
-            if (branch.branchId === branchId) {
-                const updatedSemesters = branch.semesters.map(sem =>
-                    sem.semesterName === oldSemesterName
-                        ? { ...sem, semesterName: newSemesterName }
-                        : sem
-                );
-                return { ...branch, semesters: updatedSemesters };
-            }
-            return branch;
-        });
-        localStorage.setItem('branches', JSON.stringify(updatedBranches));
-
-        setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
-        setEditingSemester(null);
-        toast.success('Semester renamed successfully', { position: 'top-center' });
-    };
-
-    const startEditingBranch = (branch) => {
-        setEditingBranch(branch.branchId);
-        setNewBranchName(branch.branchName);
-    };
-
-    const cancelEditingBranch = () => {
-        setEditingBranch(null);
-        setNewBranchName('');
-    };
-
-    const saveEditedBranch = (branchId) => {
-        if (!newBranchName.trim()) {
-            toast.error('Branch name cannot be empty', { position: 'top-center' });
-            return;
-        }
-
-        const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
-        const updatedBranches = storedBranches.map(branch => {
-            if (branch.branchId === branchId) {
-                return { ...branch, branchName: newBranchName };
-            }
-            return branch;
-        });
-        localStorage.setItem('branches', JSON.stringify(updatedBranches));
-
-        const storedInstitutes = JSON.parse(localStorage.getItem('institutes')) || [];
-        const updatedInstitutes = storedInstitutes.map(inst => {
-            if (inst.instituteId === id) {
-                const updatedBranchesList = inst.branches?.map(name =>
-                    name === currentBranches.find(b => b.branchId === branchId)?.branchName ? newBranchName : name
-                ) || [];
-                return { ...inst, branches: updatedBranchesList };
-            }
-            return inst;
-        });
-        localStorage.setItem('institutes', JSON.stringify(updatedInstitutes));
-
-        setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
-        setCurrentInstitute(updatedInstitutes.find(inst => inst.instituteId === id));
-        setEditingBranch(null);
-        toast.success('Branch renamed successfully', { position: 'top-center' });
-    };
-
-    const deleteBranch = (branchId) => {
-        if (confirm('Are you sure you want to delete this branch? This will also delete all associated semesters and timetables.')) {
-            const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
-            const updatedBranches = storedBranches.filter(branch => branch.branchId !== branchId);
-            localStorage.setItem('branches', JSON.stringify(updatedBranches));
-
-            const storedInstitutes = JSON.parse(localStorage.getItem('institutes')) || [];
-            const updatedInstitutes = storedInstitutes.map(inst => {
-                if (inst.instituteId === id) {
-                    const branchToDelete = storedBranches.find(b => b.branchId === branchId);
-                    const updatedBranchesList = inst.branches?.filter(name => name !== branchToDelete?.branchName) || [];
-                    return { ...inst, branches: updatedBranchesList };
-                }
-                return inst;
-            });
-            localStorage.setItem('institutes', JSON.stringify(updatedInstitutes));
-
-            setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
-            setCurrentInstitute(updatedInstitutes.find(inst => inst.instituteId === id));
-            toast.success('Branch deleted successfully', { position: 'top-center' });
-        }
-    };
-
-    const addSemester = (branchId) => {
-        const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
-        const updatedBranches = storedBranches.map(branch => {
-            if (branch.branchId === branchId && branch.semesters.length < 5) {
-                const lastSemester = branch.semesters[branch.semesters.length - 1];
-                const lastNumber = parseInt(lastSemester.semesterName.split(' ')[1]);
-                const newSemester = {
-                    semesterName: `Semester ${lastNumber + 2}`,
-                    sections: 1
-                };
-                return { ...branch, semesters: [...branch.semesters, newSemester] };
-            }
-            return branch;
-        });
-        localStorage.setItem('branches', JSON.stringify(updatedBranches));
-        setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
-        toast.success('Semester added successfully', { position: 'top-center' });
-    };
-
-    const deleteSemester = (branchId, semesterName) => {
-        if (confirm(`Are you sure you want to delete ${semesterName}? This will also delete all associated sections and timetables.`)) {
-            const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
-            const updatedBranches = storedBranches.map(branch => {
-                if (branch.branchId === branchId) {
-                    const updatedSemesters = branch.semesters.filter(sem => sem.semesterName !== semesterName);
-                    return { ...branch, semesters: updatedSemesters };
-                }
-                return branch;
-            });
-            localStorage.setItem('branches', JSON.stringify(updatedBranches));
-
-            setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
-            toast.success('Semester deleted successfully', { position: 'top-center' });
-        }
-    };
-
-    const addSection = (branchId, semesterName) => {
-        const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
-        const updatedBranches = storedBranches.map(branch => {
-            if (branch.branchId === branchId) {
-                const updatedSemesters = branch.semesters.map(sem => {
-                    if (sem.semesterName === semesterName && sem.sectionNames.length < 5) {
-                        // Find all existing section letters
-                        const existingLetters = sem.sectionNames.map(name =>
-                            name.split(' ')[1].charCodeAt(0)
-                        );
-
-                        // Find the first available letter starting from A
-                        let newLetterCode = 65; // 'A'
-                        while (existingLetters.includes(newLetterCode)) {
-                            newLetterCode++;
-                        }
-
-                        const newSectionName = `Section ${String.fromCharCode(newLetterCode)}`;
-                        return {
-                            ...sem,
-                            sections: sem.sections + 1,
-                            sectionNames: [...sem.sectionNames, newSectionName]
-                        };
-                    }
-                    return sem;
-                });
-                return { ...branch, semesters: updatedSemesters };
-            }
-            return branch;
-        });
-        localStorage.setItem('branches', JSON.stringify(updatedBranches));
-        setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
-        toast.success('Section added successfully', { position: 'top-center' });
-    };
-
-    const deleteSection = (branchId, semesterName, sectionName) => {
-        const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
-        const updatedBranches = storedBranches.map(branch => {
-            if (branch.branchId === branchId) {
-                const updatedSemesters = branch.semesters.map(sem => {
-                    if (sem.semesterName === semesterName && sem.sectionNames.length > 1) {
-                        return {
-                            ...sem,
-                            sections: sem.sections - 1,
-                            sectionNames: sem.sectionNames.filter(name => name !== sectionName)
-                        };
-                    }
-                    return sem;
-                });
-                return { ...branch, semesters: updatedSemesters };
-            }
-            return branch;
-        });
-        localStorage.setItem('branches', JSON.stringify(updatedBranches));
-        setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
-        toast.success(`Section ${sectionName} deleted successfully`, { position: 'top-center' });
-    };
+    
 
     if (loading) {
         return (
@@ -831,13 +854,13 @@ const Institution = () => {
                                                                             <FaTable />
                                                                             View All Timetables
                                                                         </button>
-                                                                        <button
-                                                                            onClick={() => navigateToCurriculum(branch.branchId, sem.semesterName)}
+                                                                        <Link
+                                                                            href={`/institution/${id}/branch/${branch.branchId}/semester/${encodeURIComponent(sem.semesterName)}/curriculum`}
                                                                             className="flex items-center gap-1 px-3 py-1.5 bg-blue-100 text-blue-700 text-sm rounded-lg hover:bg-blue-200 transition-colors"
                                                                         >
                                                                             <FaBook />
                                                                             Manage Curriculum
-                                                                        </button>
+                                                                        </Link>
                                                                     </div>
                                                                 </div>
                                                                 <div className="flex flex-wrap gap-2">
