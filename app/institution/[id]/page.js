@@ -90,6 +90,30 @@ const Institution = () => {
     // Search query for faculty
     const [facultySearchQuery, setFacultySearchQuery] = useState('');
 
+    // All labs state
+    const [labs, setLabs] = useState([]);
+
+    // Modal state for adding labs
+    const [isLabModalOpen, setIsLabModalOpen] = useState(false);
+
+    // Search query state for labs
+    const [labSearchQuery, setLabSearchQuery] = useState('');
+
+    // New lab form states
+    const [newLabName, setNewLabName] = useState('');
+    const [labRoomNumber, setLabRoomNumber] = useState('');
+    const [labBuilding, setLabBuilding] = useState('');
+
+    // Edit lab state
+    const [editingLab, setEditingLab] = useState(null);
+    const [isLabEditModalOpen, setIsLabEditModalOpen] = useState(false);
+
+    // Unavailability modal state
+    const [isLabUnavailabilityModalOpen, setIsLabUnavailabilityModalOpen] = useState(false);
+
+    // Current lab state
+    const [currentLab, setCurrentLab] = useState(null);
+
     // Fetch current institute and branches on mount
     useEffect(() => {
         // Fetch current institute
@@ -106,16 +130,28 @@ const Institution = () => {
         const storedFaculty = JSON.parse(localStorage.getItem('faculty')) || [];
         setFaculty(storedFaculty.filter(f => f.instituteId === id));
 
+        // Fetch labs for the current institute
+        const storedLabs = JSON.parse(localStorage.getItem('labs')) || [];
+        setLabs(storedLabs.filter(lab => lab.instituteId === id));
+
         setLoading(false);
     }, [id]);
 
-    // Filter faculty and branches based on search queries
+    // Filter faculty based on search queries
     const filteredFaculty = faculty.filter(member =>
         member.name.toLowerCase().includes(facultySearchQuery.toLowerCase())
     );
 
+    // Filter branches based on search queries
     const filteredBranches = currentBranches.filter(branch =>
         branch.branchName.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    // Filter labs based on search query
+    const filteredLabs = labs.filter(lab =>
+        lab.labName.toLowerCase().includes(labSearchQuery.toLowerCase()) ||
+        lab.roomNumber.toLowerCase().includes(labSearchQuery.toLowerCase()) ||
+        lab.building.toLowerCase().includes(labSearchQuery.toLowerCase())
     );
 
     // Handle changes in the number of semesters
@@ -478,6 +514,10 @@ const Institution = () => {
             return;
         }
 
+        if (!editingTeacher.email.trim()) {
+            editingTeacher.email = 'N/A';
+        }
+
         const updatedFaculty = faculty.map(teacher =>
             teacher.teacherId === editingTeacher.teacherId ? editingTeacher : teacher
         );
@@ -540,10 +580,17 @@ const Institution = () => {
     };
 
     // Open message modal for unavailability
-    const openMessageModal = (slotKey, message) => {
+    const openMessageModal = (slotKey, message, type = 'teacher') => {
         setCurrentSlot(slotKey);
         setCurrentMessage(message || '');
         setIsMessageModalOpen(true);
+
+        // Clear the other type when opening modal
+        if (type === 'teacher') {
+            setCurrentLab(null);
+        } else {
+            setCurrentTeacher(null);
+        }
     };
 
     // Close message modal for unavailability
@@ -553,16 +600,31 @@ const Institution = () => {
         setCurrentMessage('');
     };
 
-    // Save message for unavailability
+    // Save message for unavailability (works for both teachers and labs)
     const saveMessage = () => {
-        setCurrentTeacher(prev => {
-            const newUnavailability = { ...prev.unavailability };
-            newUnavailability[currentSlot] = {
-                unavailable: true,
-                message: currentMessage
-            };
-            return { ...prev, unavailability: newUnavailability };
-        });
+        if (currentTeacher) {
+            // For teachers
+            setCurrentTeacher(prev => {
+                const newUnavailability = { ...prev.unavailability };
+                newUnavailability[currentSlot] = {
+                    ...newUnavailability[currentSlot],
+                    unavailable: true,
+                    message: currentMessage
+                };
+                return { ...prev, unavailability: newUnavailability };
+            });
+        } else if (currentLab) {
+            // For labs
+            setCurrentLab(prev => {
+                const newUnavailability = { ...prev.unavailability };
+                newUnavailability[currentSlot] = {
+                    ...newUnavailability[currentSlot],
+                    unavailable: true,
+                    message: currentMessage
+                };
+                return { ...prev, unavailability: newUnavailability };
+            });
+        }
         closeMessageModal();
     };
 
@@ -578,15 +640,137 @@ const Institution = () => {
         toast.success('Unavailability updated successfully');
     };
 
-    const navigateToSemester = (branchId, semesterName) => {
-        router.push(`/institution/${id}/branch/${branchId}/semester/${encodeURIComponent(semesterName)}`);
+    // Add new lab
+    const handleAddLab = () => {
+        if (!newLabName.trim()) {
+            toast.error('Lab name is required');
+            return;
+        }
+
+        const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const initialAvailability = {};
+
+        days.forEach(day => {
+            const periods = periodsPerDay;
+            for (let period = 1; period <= periods; period++) {
+                const slotKey = `${day}-${period}`;
+                initialAvailability[slotKey] = {
+                    unavailable: false,
+                    allocated: false,
+                    message: 'Available'
+                };
+            }
+        });
+
+        const lab = {
+            labName: newLabName,
+            roomNumber: labRoomNumber || 'N/A',
+            building: labBuilding || 'N/A',
+            instituteId: id,
+            labId: Date.now().toString(),
+            unavailability: initialAvailability
+        };
+
+        const updatedLabs = [...labs, lab];
+        setLabs(updatedLabs);
+        localStorage.setItem('labs', JSON.stringify(updatedLabs));
+
+        setNewLabName('');
+        setLabRoomNumber('');
+        setLabBuilding('');
+        setIsLabModalOpen(false);
+        toast.success('Lab added successfully');
+    };
+
+    // Edit lab
+    const openLabEditModal = (lab) => {
+        setEditingLab(JSON.parse(JSON.stringify(lab)));
+        setIsLabEditModalOpen(true);
+    };
+
+    // Save lab changes
+    const handleSaveLab = () => {
+        if (!editingLab.labName.trim()) {
+            toast.error('Lab name is required');
+            return;
+        }
+
+        const updatedLabs = labs.map(lab =>
+            lab.labId === editingLab.labId ? editingLab : lab
+        );
+
+        setLabs(updatedLabs);
+        localStorage.setItem('labs', JSON.stringify(updatedLabs));
+        setIsLabEditModalOpen(false);
+        toast.success('Lab updated successfully');
+    };
+
+    // Delete lab
+    const deleteLab = (labId) => {
+        if (confirm('Are you sure you want to delete this lab?')) {
+            const updatedLabs = labs.filter(l => l.labId !== labId);
+            setLabs(updatedLabs);
+            localStorage.setItem('labs', JSON.stringify(updatedLabs));
+            toast.success('Lab deleted successfully');
+        }
+    };
+
+    // Open lab unavailability modal
+    const openLabUnavailabilityModal = (lab) => {
+        setCurrentLab(JSON.parse(JSON.stringify(lab)));
+        setIsLabUnavailabilityModalOpen(true);
+    };
+
+    //Close lab unavailability modal
+    const closeLabUnavailabilityModal = () => {
+        setIsLabUnavailabilityModalOpen(false);
+        setCurrentLab(null);
+    };
+
+    // Toggle unavailability for that particular lab slot
+    const toggleLabUnavailability = (slotKey) => {
+        if (currentLab.unavailability[slotKey]?.allocated) {
+            toast.error('This slot is already allocated. Cannot toggle unavailability.');
+            return;
+        }
+
+        setCurrentLab(prev => {
+            const newUnavailability = { ...prev.unavailability };
+            const currentSlot = newUnavailability[slotKey] || {
+                unavailable: false,
+                allocated: false,
+                message: 'Occupied'
+            };
+
+            const newStatus = !currentSlot.unavailable;
+
+            newUnavailability[slotKey] = {
+                ...currentSlot,
+                unavailable: newStatus,
+                message: newStatus
+                    ? 'Not available (maintenance)'
+                    : 'No commitment'
+            };
+
+            return { ...prev, unavailability: newUnavailability };
+        });
+    };
+
+    // Save lab unavailability changes
+    const saveLabUnavailability = () => {
+        const updatedLabs = labs.map(lab =>
+            lab.labId === currentLab.labId ? currentLab : lab
+        );
+
+        setLabs(updatedLabs);
+        localStorage.setItem('labs', JSON.stringify(updatedLabs));
+        closeLabUnavailabilityModal();
+        toast.success('Lab availability updated successfully');
     };
 
     const navigateToSection = (branchId, semesterName, section) => {
         router.push(`/institution/${id}/branch/${branchId}/semester/${encodeURIComponent(semesterName)}/section/${section}`);
     };
-
-    
 
     if (loading) {
         return (
@@ -628,7 +812,7 @@ const Institution = () => {
                     </div>
                 </div>
 
-                {/* Tabs - Modified Section */}
+                {/* Tabs */}
                 <div className="flex border-b border-gray-200 mb-6">
                     <button
                         onClick={() => setActiveTab('branches')}
@@ -642,8 +826,13 @@ const Institution = () => {
                     >
                         Faculty Pool
                     </button>
+                    <button
+                        onClick={() => setActiveTab('labs')}
+                        className={`px-4 py-2 font-medium ${activeTab === 'labs' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}
+                    >
+                        Labs
+                    </button>
                 </div>
-
 
                 {/* Branches Section */}
                 {activeTab === 'branches' && (
@@ -847,15 +1036,15 @@ const Institution = () => {
                                                                         <span>Sections:</span>
                                                                     </div>
                                                                     <div className="flex gap-2">
-                                                                        <button
-                                                                            onClick={() => navigateToSemester(branch.branchId, sem.semesterName)}
+                                                                        <Link
+                                                                            href={`/institution/${id}/branch/${branch.branchId}/semester/${encodeURIComponent(sem.semesterId)}/timetables`}
                                                                             className="flex items-center gap-1 px-3 py-1.5 bg-indigo-100 text-indigo-700 text-sm rounded-lg hover:bg-indigo-200 transition-colors"
                                                                         >
                                                                             <FaTable />
                                                                             View All Timetables
-                                                                        </button>
+                                                                        </Link>
                                                                         <Link
-                                                                            href={`/institution/${id}/branch/${branch.branchId}/semester/${encodeURIComponent(sem.semesterName)}/curriculum`}
+                                                                            href={`/institution/${id}/branch/${branch.branchId}/semester/${encodeURIComponent(sem.semesterId)}/curriculum`}
                                                                             className="flex items-center gap-1 px-3 py-1.5 bg-blue-100 text-blue-700 text-sm rounded-lg hover:bg-blue-200 transition-colors"
                                                                         >
                                                                             <FaBook />
@@ -1025,6 +1214,119 @@ const Institution = () => {
                                                                 onClick={() => deleteTeacher(teacher.teacherId)}
                                                                 className="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50 transition-colors"
                                                                 title="Delete teacher"
+                                                            >
+                                                                <FaTrash className="text-lg" />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
+                        </div>
+                    </>
+                )}
+
+                {activeTab === 'labs' && (
+                    <>
+                        {/* Labs Header */}
+                        <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200 mb-6">
+                            <div className="p-6">
+                                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                                    <div className="flex items-center gap-4">
+                                        <div className="p-3 bg-indigo-100 rounded-xl">
+                                            <FaUniversity className="text-3xl text-indigo-600" />
+                                        </div>
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-gray-800">Laboratories</h2>
+                                            <p className="text-gray-500">{labs.length} {labs.length === 1 ? 'lab' : 'labs'}</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-col sm:flex-row gap-3">
+                                        <div className="relative flex-1 min-w-[200px]">
+                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                <FaSearch className="text-gray-400" />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                placeholder="Search labs..."
+                                                value={labSearchQuery}
+                                                onChange={(e) => setLabSearchQuery(e.target.value)}
+                                                className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+                                            />
+                                        </div>
+                                        <button
+                                            onClick={() => setIsLabModalOpen(true)}
+                                            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-lg shadow hover:bg-indigo-700 transition whitespace-nowrap"
+                                        >
+                                            <FaPlus className="text-lg" />
+                                            Add Lab
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Labs Table */}
+                        <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
+                            <div className="overflow-x-auto">
+                                {filteredLabs.length === 0 ? (
+                                    <div className="p-8 text-center">
+                                        <FaUniversity className="mx-auto text-4xl text-gray-400 mb-3" />
+                                        <h4 className="text-lg font-medium text-gray-700">No laboratories yet</h4>
+                                        <p className="text-gray-500 mb-4">Add your first lab to get started</p>
+                                        <button
+                                            onClick={() => setIsLabModalOpen(true)}
+                                            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                                        >
+                                            Add Lab
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                        <thead className="bg-gray-50 text-center font-semibold text-gray-600 text-xl">
+                                            <tr>
+                                                <th className="px-6 py-4">LAB NAME</th>
+                                                <th className="px-6 py-4">ROOM NUMBER</th>
+                                                <th className="px-6 py-4">BUILDING</th>
+                                                <th className="px-6 py-4">ACTIONS</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="bg-white divide-y divide-gray-200 text-center text-lg font-serif">
+                                            {filteredLabs.map(lab => (
+                                                <tr key={lab.labId} className="hover:bg-gray-50 transition-colors">
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        <div className="text-gray-800">{lab.labName}</div>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        <div className="text-gray-600">{lab.roomNumber}</div>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        <div className="text-gray-600">{lab.building}</div>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        <div className="flex justify-center gap-4">
+                                                            <button
+                                                                onClick={() => openLabEditModal(lab)}
+                                                                className="text-blue-600 hover:text-blue-800 p-2 rounded-lg hover:bg-blue-50 transition-colors"
+                                                                title="Edit lab"
+                                                            >
+                                                                <FaEdit className="text-lg" />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => openLabUnavailabilityModal(lab)}
+                                                                className="text-indigo-600 hover:text-indigo-800 p-2 rounded-lg hover:bg-indigo-50 transition-colors"
+                                                                title="Edit availability"
+                                                            >
+                                                                <FaCalendarAlt className="text-lg" />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => deleteLab(lab.labId)}
+                                                                className="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50 transition-colors"
+                                                                title="Delete lab"
                                                             >
                                                                 <FaTrash className="text-lg" />
                                                             </button>
@@ -1348,7 +1650,7 @@ const Institution = () => {
                 </div>
             )}
 
-            {/* Unavailability Modal */}
+            {/* Faculty Unavailability Modal */}
             {isUnavailabilityModalOpen && currentTeacher && (
                 <div className="fixed inset-0 z-50 overflow-y-auto">
                     <div className="flex items-center justify-center min-h-screen p-4">
@@ -1430,7 +1732,7 @@ const Institution = () => {
                                                                     P{period}
                                                                 </button>
                                                                 <button
-                                                                    onClick={() => !slot.allocated && openMessageModal(slotKey, slot.message)}
+                                                                    onClick={() => openMessageModal(slotKey, slot.message, 'teacher')}
                                                                     className={`py-2 px-3 rounded-r ${status === 'allocated' ? 'bg-blue-600 text-white cursor-not-allowed' :
                                                                         'bg-gray-200 text-gray-700 hover:bg-gray-300'
                                                                         }`}
@@ -1473,6 +1775,284 @@ const Institution = () => {
                 </div>
             )}
 
+            {/* Add Lab Modal */}
+            {isLabModalOpen && (
+                <div className="fixed inset-0 z-50 overflow-y-auto">
+                    <div className="flex items-center justify-center min-h-screen px-4">
+                        <div
+                            className="fixed inset-0 bg-black bg-opacity-40 transition-opacity"
+                            onClick={() => setIsLabModalOpen(false)}
+                        ></div>
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md z-50 relative overflow-hidden transform transition-all">
+                            <div className="p-6">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className="p-2 bg-indigo-100 rounded-lg">
+                                        <FaUniversity className="text-indigo-600 text-xl" />
+                                    </div>
+                                    <h2 className="text-xl font-bold">Add New Laboratory</h2>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
+                                            <span>Lab Name</span>
+                                            <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={newLabName}
+                                            onChange={(e) => setNewLabName(e.target.value)}
+                                            placeholder="e.g. Computer Lab, Physics Lab"
+                                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-700 mb-1">Room Number</label>
+                                        <input
+                                            type="text"
+                                            value={labRoomNumber}
+                                            onChange={(e) => setLabRoomNumber(e.target.value)}
+                                            placeholder="e.g. 101, A-12"
+                                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-700 mb-1">Building/Block</label>
+                                        <input
+                                            type="text"
+                                            value={labBuilding}
+                                            onChange={(e) => setLabBuilding(e.target.value)}
+                                            placeholder="e.g. Main Building, Science Block"
+                                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="bg-gray-50 px-6 py-4 flex justify-end space-x-3 border-t">
+                                <button
+                                    onClick={() => setIsLabModalOpen(false)}
+                                    className="px-5 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleAddLab}
+                                    className="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-md"
+                                >
+                                    Add Laboratory
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit Lab Modal */}
+            {isLabEditModalOpen && editingLab && (
+                <div className="fixed inset-0 z-50 overflow-y-auto">
+                    <div className="flex items-center justify-center min-h-screen px-4">
+                        <div
+                            className="fixed inset-0 bg-black bg-opacity-40 transition-opacity"
+                            onClick={() => setIsLabEditModalOpen(false)}
+                        ></div>
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md z-50 relative overflow-hidden transform transition-all">
+                            <div className="p-6">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className="p-2 bg-blue-100 rounded-lg">
+                                        <FaEdit className="text-blue-600 text-xl" />
+                                    </div>
+                                    <h2 className="text-xl font-bold">Edit Laboratory</h2>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
+                                            <span>Lab Name</span>
+                                            <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={editingLab.labName}
+                                            onChange={(e) => setEditingLab({
+                                                ...editingLab,
+                                                labName: e.target.value
+                                            })}
+                                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-700 mb-1">Room Number</label>
+                                        <input
+                                            type="text"
+                                            value={editingLab.roomNumber}
+                                            onChange={(e) => setEditingLab({
+                                                ...editingLab,
+                                                roomNumber: e.target.value
+                                            })}
+                                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-700 mb-1">Building/Block</label>
+                                        <input
+                                            type="text"
+                                            value={editingLab.building}
+                                            onChange={(e) => setEditingLab({
+                                                ...editingLab,
+                                                building: e.target.value
+                                            })}
+                                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="bg-gray-50 px-6 py-4 flex justify-end space-x-3 border-t">
+                                <button
+                                    onClick={() => setIsLabEditModalOpen(false)}
+                                    className="px-5 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleSaveLab}
+                                    className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-md"
+                                >
+                                    Save Changes
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Lab Unavailability Modal */}
+            {isLabUnavailabilityModalOpen && currentLab && (
+                <div className="fixed inset-0 z-50 overflow-y-auto">
+                    <div className="flex items-center justify-center min-h-screen p-4">
+                        {/* Backdrop */}
+                        <div
+                            className="fixed inset-0 bg-black bg-opacity-40"
+                            onClick={closeLabUnavailabilityModal}
+                        />
+
+                        {/* Modal Container */}
+                        <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col z-50 overflow-hidden">
+                            {/* Header */}
+                            <div className="p-6 border-b border-gray-200 sticky top-0 bg-white z-10">
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-3">
+                                        <FaCalendarAlt className="text-2xl text-indigo-600" />
+                                        <h2 className="text-xl font-bold">Availability for {currentLab.labName}</h2>
+                                    </div>
+                                    <button
+                                        onClick={closeLabUnavailabilityModal}
+                                        className="text-gray-400 hover:text-gray-500"
+                                    >
+                                        <FaTimes className="h-6 w-6" />
+                                    </button>
+                                </div>
+                                <p className="text-sm text-gray-500 mt-1">
+                                    {currentLab.roomNumber} • {currentLab.building}
+                                </p>
+
+                                {/* Legend */}
+                                <div className="flex flex-wrap gap-4 mt-4">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                                        <span className="text-sm">Available</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                                        <span className="text-sm">Allocated</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                                        <span className="text-sm">Unavailable (Maintenance/Booking)</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Scrollable Content */}
+                            <div className="overflow-y-auto p-6">
+                                <div className="grid grid-cols-6 gap-2">
+                                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                                        <div key={day} className="col-span-1">
+                                            <div className="bg-indigo-100 text-indigo-800 text-center py-2 rounded-t-lg font-medium">
+                                                {day}
+                                            </div>
+                                            <div className="space-y-2 p-2 border border-t-0 border-gray-200 rounded-b-lg">
+                                                {Array.from({ length: periodsPerDay }, (_, i) => {
+                                                    const period = i + 1;
+                                                    const slotKey = `${day}-${period}`;
+                                                    const slot = currentLab.unavailability?.[slotKey] || {
+                                                        unavailable: false,
+                                                        allocated: false,
+                                                        message: 'No commitment'
+                                                    };
+
+                                                    const status = slot.allocated ? 'allocated' :
+                                                        slot.unavailable ? 'unavailable' : 'available';
+
+                                                    const statusClasses = {
+                                                        available: 'bg-green-100 text-green-800 hover:bg-green-200',
+                                                        allocated: 'bg-blue-500 text-white cursor-not-allowed',
+                                                        unavailable: 'bg-red-500 text-white hover:bg-red-600'
+                                                    };
+
+                                                    return (
+                                                        <div key={period} className="flex flex-col">
+                                                            <div className="flex">
+                                                                <button
+                                                                    onClick={() => toggleLabUnavailability(slotKey)}
+                                                                    className={`flex-1 py-2 text-sm rounded-l transition-all ${statusClasses[status]}`}
+                                                                    title={slot.allocated ? "Allocated for class" : ""}
+                                                                >
+                                                                    P{period}
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => openMessageModal(slotKey, slot.message, 'lab')}
+                                                                    className={`py-2 px-3 rounded-r ${status === 'allocated' ? 'bg-blue-600 text-white cursor-not-allowed' :
+                                                                        'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                                                        }`}
+                                                                    disabled={slot.allocated || !slot.unavailable}
+                                                                >
+                                                                    <FaEdit className="h-4 w-4" />
+                                                                </button>
+                                                            </div>
+                                                            {slot.message && (
+                                                                <div className="mt-1 text-xs text-gray-500 truncate" title={slot.message}>
+                                                                    {slot.message}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Footer */}
+                            <div className="bg-gray-50 px-6 py-4 flex justify-end space-x-3 border-t sticky bottom-0">
+                                <button
+                                    onClick={closeLabUnavailabilityModal}
+                                    className="px-5 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={saveLabUnavailability}
+                                    className="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-md"
+                                >
+                                    Save Changes
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Message Modal */}
             {isMessageModalOpen && (
                 <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -1484,7 +2064,9 @@ const Institution = () => {
                         <div className="bg-white rounded-xl shadow-2xl w-full max-w-md z-50 relative overflow-hidden transform transition-all">
                             <div className="p-6">
                                 <div className="flex justify-between items-center mb-4">
-                                    <h2 className="text-xl font-bold">Unavailability Reason</h2>
+                                    <h2 className="text-xl font-bold">
+                                        {currentTeacher ? 'Teacher' : currentLab ? 'Lab' : ''} Unavailability Reason
+                                    </h2>
                                     <button
                                         onClick={closeMessageModal}
                                         className="text-gray-400 hover:text-gray-500"
@@ -1495,13 +2077,17 @@ const Institution = () => {
                                 <div className="mt-4">
                                     <label className="block text-sm font-medium text-gray-700 mb-1">
                                         Reason for {currentSlot} unavailability
+                                        {currentTeacher && ` (${currentTeacher.name})`}
+                                        {currentLab && ` (${currentLab.labName})`}
                                     </label>
                                     <textarea
                                         value={currentMessage}
                                         onChange={(e) => setCurrentMessage(e.target.value)}
                                         className="w-full border border-gray-300 rounded-md p-3 focus:ring-indigo-500 focus:border-indigo-500"
                                         rows={3}
-                                        placeholder="e.g. Meeting, Personal time, Other commitment..."
+                                        placeholder={currentTeacher ?
+                                            "e.g. Meeting, Personal time, Other commitment..." :
+                                            "e.g. Maintenance, Equipment repair, Special booking..."}
                                     />
                                 </div>
                             </div>
@@ -1523,6 +2109,7 @@ const Institution = () => {
                     </div>
                 </div>
             )}
+
         </div>
     );
 };
