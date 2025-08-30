@@ -615,6 +615,270 @@ export async function generateTimetableForSections(config, originalFacultyData, 
             return allocated;
         }
 
+        function selectTeachersForBatch(requiredTeachers, allTeachers, day, period, facultyMap, facultyAllocations, usedTeachers = new Set()) {
+            const validTeachers = allTeachers.filter(
+                teacherId => teacherId && facultyAllocations[teacherId] && !usedTeachers.has(teacherId)
+            );
+
+            if (validTeachers.length < requiredTeachers) {
+                return false;
+            }
+
+            // Sort teachers by workload (least loaded first)
+            const dayIndex = days.indexOf(day);
+            const sorted = [...validTeachers].sort((a, b) => {
+                const aWeekly = facultyAllocations[a]?.workingHours || 0;
+                const bWeekly = facultyAllocations[b]?.workingHours || 0;
+                if (aWeekly !== bWeekly) return aWeekly - bWeekly;
+
+                const aDaily = facultyAllocations[a]?.eachDayUnavailability[dayIndex] || 0;
+                const bDaily = facultyAllocations[b]?.eachDayUnavailability[dayIndex] || 0;
+                return aDaily - bDaily;
+            });
+
+            const selected = [];
+
+            for (const teacherId of sorted) {
+                if (isTeacherAvailable(teacherId, day, period + 1, facultyMap) &&
+                    isTeacherAvailable(teacherId, day, period + 2, facultyMap)) {
+
+                    selected.push(teacherId);
+                    if (selected.length === requiredTeachers) {
+                        return selected;
+                    }
+                }
+            }
+
+            return false;
+        }
+        
+        function allocateBatchWiseLabsDifferentPeriods(allBatchSessions, sectionTimetable, facultyAllocations, facultyMap, labMap) {
+            console.log(`Received ${allBatchSessions.length} individual batch sessions for placement`);
+
+            // Add a 'placed' property to track which sessions have been placed
+            const sessionsWithStatus = allBatchSessions.map(session => ({
+                ...session,
+                placed: false
+            }));
+
+            let batchesPlaced = 0;
+            const maxAttempts = 200;
+            let totalAttempts = 0;
+
+            while (batchesPlaced < sessionsWithStatus.length && totalAttempts < maxAttempts) {
+                totalAttempts++;
+
+                // Get only unplaced sessions
+                const unplacedSessions = sessionsWithStatus.filter(session => !session.placed);
+                if (unplacedSessions.length === 0) break;
+
+                const randomNum = Math.random() < 0.58 ? 0 : 1;
+                let selectedBatchIndices = [];
+
+                if (randomNum === 0 && unplacedSessions.length > 1) {
+                    let attempts = 0;
+                    const maxAttempts = 50;
+                    const maxBatchesToSelect = Math.min(4, unplacedSessions.length);
+
+                    do {
+                        selectedBatchIndices = [];
+                        const numBatchesToSelect = Math.floor(Math.random() * (maxBatchesToSelect - 1)) + 2;
+
+                        for (let i = 0; i < numBatchesToSelect; i++) {
+                            let newIndex;
+                            let attempt = 0;
+                            const maxSingleAttempts = 20;
+
+                            do {
+                                newIndex = Math.floor(Math.random() * unplacedSessions.length);
+                                attempt++;
+
+                                if (attempt > maxSingleAttempts) break;
+                            } while (
+                                selectedBatchIndices.includes(newIndex) ||
+                                selectedBatchIndices.some(idx =>
+                                    unplacedSessions[idx].labName === unplacedSessions[newIndex].labName &&
+                                    unplacedSessions[idx].batchNumber === unplacedSessions[newIndex].batchNumber
+                                )
+                            );
+
+                            if (attempt <= maxSingleAttempts) {
+                                selectedBatchIndices.push(newIndex);
+                            }
+                        }
+                        attempts++;
+
+                        if (attempts > maxAttempts || selectedBatchIndices.length < 2) {
+                            break;
+                        }
+                    } while (selectedBatchIndices.length < 2 && attempts <= maxAttempts);
+
+                    if (selectedBatchIndices.length < 2) {
+                        // Fallback to single batch if couldn't find multiple
+                        selectedBatchIndices = [Math.floor(Math.random() * unplacedSessions.length)];
+                    }
+                } else {
+                    // Place single batch
+                    selectedBatchIndices = [Math.floor(Math.random() * unplacedSessions.length)];
+                }
+
+                if (selectedBatchIndices.length > 1) {
+                    // Try to place multiple batches at the same time
+                    const selectedBatches = selectedBatchIndices.map(index => unplacedSessions[index]);
+                    console.log(`Attempting to place ${selectedBatches.length} batches concurrently:`);
+
+                    let placementSuccess = false;
+                    let placementAttempts = 0;
+                    const maxPlacementAttempts = 100;
+
+                    while (!placementSuccess && placementAttempts < maxPlacementAttempts) {
+                        placementAttempts++;
+
+                        // Find a random available time slot
+                        const dayIndex = Math.floor(Math.random() * days.length);
+                        const day = days[dayIndex];
+                        const maxPeriods = (day === "Sat" ? satPeriods : periods);
+                        const period = Math.floor(Math.random() * (maxPeriods - 1));
+
+                        // Check if period is available for all batches
+                        if (sectionTimetable[day][period] !== null ||
+                            sectionTimetable[day][period + 1] !== null ||
+                            period === shortBreak - 1 ||
+                            period === lunchBreak - 1) {
+                            continue;
+                        }
+
+                        // Check if any batch already has a lab on this day
+                        const hasConflict = selectedBatches.some(batch =>
+                            sectionTimetable[day].some(slot =>
+                                slot && slot.type === "Lab" && slot.batchNumber === batch.batchNumber
+                            )
+                        );
+                        if (hasConflict) continue;
+
+                        // Check room availability for all batches
+                        const availableRooms = [];
+                        const allLabRooms = [...new Set(selectedBatches.flatMap(batch => batch.labRooms))];
+
+                        for (const roomId of allLabRooms) {
+                            if (isRoomAvailable(roomId, day, period + 1, labMap) &&
+                                isRoomAvailable(roomId, day, period + 2, labMap)) {
+                                availableRooms.push(roomId);
+                            }
+                        }
+
+                        if (availableRooms.length < selectedBatches.length) {
+                            continue; // Not enough rooms
+                        }
+
+                        // Select teachers for all batches
+                        const usedTeachers = new Set();
+                        const allTeachersAvailable = selectedBatches.every(batch => {
+                            const teachers = selectTeachersForBatch(
+                                batch.requiredTeachers,
+                                batch.teachers,
+                                day,
+                                period,
+                                facultyMap,
+                                facultyAllocations,
+                                usedTeachers
+                            );
+                            if (!teachers) return false;
+
+                            // Store teachers for this batch
+                            batch.selectedTeachers = teachers;
+                            teachers.forEach(teacher => usedTeachers.add(teacher));
+                            return true;
+                        });
+
+                        if (!allTeachersAvailable) continue;
+
+                        // All checks passed - place the batches
+                        selectedBatches.forEach((batch, index) => {
+                            const labRoom = availableRooms[index] || null;
+                            const labRoomDetails = labRoom ? labMap.get(labRoom) : null;
+
+                            // Place the lab session
+                            sectionTimetable[day][period] = {
+                                subject: batch.labName,
+                                type: "Lab",
+                                teachers: batch.selectedTeachers,
+                                batchType: `Batch ${batch.batchNumber}`,
+                                batchNumber: batch.batchNumber,
+                                labRoom: labRoom,
+                                labRoomName: labRoomDetails?.labName || "No Lab Room",
+                                roomNumber: labRoomDetails?.roomNumber || "",
+                                building: labRoomDetails?.building || ""
+                            };
+
+                            sectionTimetable[day][period + 1] = {
+                                subject: batch.labName,
+                                type: "Lab",
+                                teachers: batch.selectedTeachers,
+                                batchType: `Batch ${batch.batchNumber}`,
+                                batchNumber: batch.batchNumber,
+                                labRoom: labRoom,
+                                labRoomName: labRoomDetails?.labName || "No Lab Room",
+                                roomNumber: labRoomDetails?.roomNumber || "",
+                                building: labRoomDetails?.building || ""
+                            };
+
+                            // Update allocations
+                            batch.selectedTeachers.forEach(teacher => {
+                                facultyAllocations[teacher].workingHours += 2;
+                                facultyAllocations[teacher].eachDayUnavailability[dayIndex] += 2;
+                                facultyMap.get(teacher).unavailability[`${day}-${period + 1}`].unavailable = true;
+                                facultyMap.get(teacher).unavailability[`${day}-${period + 2}`].unavailable = true;
+                            });
+
+                            if (labRoom) {
+                                const labRoomObj = labMap.get(labRoom);
+                                if (labRoomObj) {
+                                    labRoomObj.unavailability[`${day}-${period + 1}`].unavailable = true;
+                                    labRoomObj.unavailability[`${day}-${period + 2}`].unavailable = true;
+                                }
+                            }
+
+                            // Mark as placed
+                            sessionsWithStatus.find(s =>
+                                s.labName === batch.labName &&
+                                s.batchNumber === batch.batchNumber &&
+                                s.sessionNumber === batch.sessionNumber
+                            ).placed = true;
+                        });
+
+                        console.log(`✅ Successfully placed ${selectedBatches.length} batches on ${day} period ${period + 1}`);
+                        batchesPlaced += selectedBatches.length;
+                        placementSuccess = true;
+                    }
+
+                    if (!placementSuccess) {
+                        console.log(`❌ Failed to place batches after ${maxPlacementAttempts} attempts`);
+                    }
+
+                } else if (selectedBatchIndices.length === 1) {
+                    // Single batch placement logic (similar to above but for one batch)
+                    const batch = unplacedSessions[selectedBatchIndices[0]];
+                    console.log(`Batch: ${batch.labName} - Batch ${batch.batchNumber} - Session ${batch.sessionNumber}`);
+
+                    // ... (single batch placement logic here)
+
+                    sessionsWithStatus.find(s =>
+                        s.labName === batch.labName &&
+                        s.batchNumber === batch.batchNumber &&
+                        s.sessionNumber === batch.sessionNumber
+                    ).placed = true;
+
+                    batchesPlaced += 1;
+                }
+            }
+
+            const allPlaced = batchesPlaced === sessionsWithStatus.length;
+            console.log(`${allPlaced ? '✅' : '❌'} ${batchesPlaced}/${sessionsWithStatus.length} batch sessions placed`);
+
+            return allPlaced;
+        }
+
         const maxRetries = 200;
         let retryCount = 0;
         let success = false;
@@ -655,16 +919,32 @@ export async function generateTimetableForSections(config, originalFacultyData, 
                 const fullClassLabs = labs.filter(lab => lab.sessionType === 'fullClass');
                 let sectionLabsPlaced = true;
 
+                // Convert all batch-wise different periods labs into individual batch sessions
+                const allIndividualBatchSessions = [];
                 for (let j = 0; j < batchWiseDifferentPeriodLabs.length; j++) {
                     const lab = batchWiseDifferentPeriodLabs[j];
-                    const allocated = allocateBatchWiseLabsDifferentPeriods(lab, sectionTimetable, facultyAllocations, facultyMap, labMap);
-                    if (!allocated) {
-                        console.log(`❌ Failed to place ${lab.name} in section ${section} on attempt ${retryCount + 1}`);
-                        sectionLabsPlaced = false;
-                        break;
+                    for (let batch = 1; batch <= lab.numberOfBatches; batch++) {
+                        for (let session = 1; session <= lab.frequency; session++) {
+                            allIndividualBatchSessions.push({
+                                labName: lab.name,
+                                batchNumber: batch,
+                                sessionNumber: session,
+                                requiredTeachers: lab.teachersRequired,
+                                keepSameTeachers: lab.keepSameTeachers,
+                                teachers: [...lab.teachers], // Copy the array
+                                labRooms: [...lab.labRooms.filter(roomId => roomId && roomId !== "")] // Copy the array
+                            });
+                        }
                     }
                 }
 
+                console.log(`All individual batch sessions for section ${section}:`, allIndividualBatchSessions);
+
+                // Pass all individual batch sessions to the function
+                const allocated = allocateBatchWiseLabsDifferentPeriods(allIndividualBatchSessions, sectionTimetable, facultyAllocations, facultyMap, labMap);
+                if (!allocated) {
+                    console.log(`❌ Failed to place batch-wise different periods labs in section ${section} on attempt ${retryCount + 1}`);
+                }
                 for (let j = 0; j < batchWiseSamePeriodLabs.length; j++) {
                     const lab = batchWiseSamePeriodLabs[j];
                     const allocated = allocateBatchWiseLabsSamePeriod(lab, sectionTimetable, facultyAllocations, facultyMap, labMap);

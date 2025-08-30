@@ -1290,7 +1290,7 @@ const SemesterSetup = () => {
                                         <FaFlask className="w-8 h-8" />
                                     </div>
                                     <h3 className="text-lg font-medium text-gray-900 mb-1">No lab sessions added</h3>
-                                    <p className="text-gray-500 mb-6">Click "Add Lab Session" to get started</p>
+                                    <p className="text-gray-500 mb-6">Click &quot;Add Lab Session&quot; to get started</p>
                                     <button
                                         onClick={addLabForm}
                                         className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all flex items-center gap-2 shadow-sm hover:shadow-md"

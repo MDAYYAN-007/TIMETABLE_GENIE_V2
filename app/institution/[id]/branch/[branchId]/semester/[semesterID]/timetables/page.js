@@ -142,7 +142,7 @@ const TimetableTestPage = () => {
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
                         <h2 className="text-lg font-semibold text-blue-800 mb-2">How it works</h2>
                         <ul className="list-disc list-inside text-blue-700 space-y-1">
-                            <li>Click "Generate Timetable" to run the algorithm</li>
+                            <li>Click &quot;Generate Timetable&quot; to run the algorithm</li>
                             <li>Results will be displayed in the console and available for download</li>
                             <li>Check the browser console (F12) to see the detailed timetable data</li>
                             <li>Download the JSON file to inspect the complete structure</li>
