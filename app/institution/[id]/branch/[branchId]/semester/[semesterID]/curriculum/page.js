@@ -408,7 +408,7 @@ const SemesterSetup = () => {
             }
         }
 
-        // Validate labs
+        // Validate labs (removed labRoom validation)
         for (const lab of formData.labs) {
             if (lab.frequency < 1) {
                 toast.error('Lab frequency must be at least 1');
@@ -420,10 +420,7 @@ const SemesterSetup = () => {
                 return;
             }
 
-            if (!lab.labRoom) {
-                toast.error('Please select a lab room for all lab sessions');
-                return;
-            }
+            // Lab room is optional, so no validation for it
 
             for (const teacherId of lab.teachers) {
                 if (!teacherId) {
@@ -452,6 +449,8 @@ const SemesterSetup = () => {
 
         localStorage.setItem('semesterConfigs', JSON.stringify([...filteredConfigs, newConfig]));
         toast.success('Configuration saved successfully');
+
+        router.push(`/institution/${id}/branch/${branchId}/semester/${encodeURIComponent(semesterID)}/timetables`);
     };
 
     if (loading) {
@@ -482,7 +481,8 @@ const SemesterSetup = () => {
                             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
                                 <div>
                                     <h1 className="text-3xl font-bold text-gray-800">
-                                        Curriculum
+                                        {currentSemester?.semesterName}
+                                        {' '} Curriculum
                                     </h1>
                                     <p className="text-gray-600 mt-2">
                                         Configure your semester timetable settings and assign faculty
@@ -811,21 +811,7 @@ const SemesterSetup = () => {
                                 </button>
                             </div>
 
-                            {labs.length === 0 ? (
-                                <div className="text-center py-8">
-                                    <div className="mx-auto h-20 w-20 text-gray-400 mb-4 flex items-center justify-center bg-gray-100 rounded-full">
-                                        <FaFlask className="w-8 h-8" />
-                                    </div>
-                                    <h3 className="text-lg font-medium text-gray-900 mb-1">No labs added</h3>
-                                    <p className="text-gray-500 mb-6">Add lab rooms first to create lab sessions</p>
-                                    <button
-                                        onClick={() => setIsLabModalOpen(true)}
-                                        className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all flex items-center gap-2 shadow-sm hover:shadow-md"
-                                    >
-                                        <FaPlus /> Add Lab Room
-                                    </button>
-                                </div>
-                            ) : formData.labs.length === 0 ? (
+                            {formData.labs.length === 0 ? (
                                 <div className="text-center py-8">
                                     <div className="mx-auto h-20 w-20 text-gray-400 mb-4 flex items-center justify-center bg-gray-100 rounded-full">
                                         <FaFlask className="w-8 h-8" />
@@ -888,20 +874,23 @@ const SemesterSetup = () => {
 
                                             <div className="mb-4">
                                                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                    Lab Room
+                                                    Lab Room (Optional)
                                                 </label>
                                                 <select
                                                     value={lab.labRoom || ''}
                                                     onChange={(e) => updateLab(lab.id, 'labRoom', e.target.value)}
                                                     className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
                                                 >
-                                                    <option value="">Select Lab Room</option>
+                                                    <option value="">Select Lab Room (Optional)</option>
                                                     {labs.map(labRoom => (
                                                         <option key={labRoom.labId} value={labRoom.labId}>
                                                             {labRoom.labName} ({labRoom.roomNumber})
                                                         </option>
                                                     ))}
                                                 </select>
+                                                <p className="text-xs text-gray-500 mt-1">
+                                                    Optional: Select if you want to assign a specific lab room
+                                                </p>
                                             </div>
 
                                             {/* Teachers Assignment Section */}
