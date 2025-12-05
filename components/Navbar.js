@@ -1,117 +1,98 @@
-'use client';
+"use client";
 
 import Link from "next/link";
-import { FaHome, FaInfoCircle, FaListAlt, FaSignInAlt, FaBars, FaTimes } from "react-icons/fa";
 import { useState } from "react";
+import {
+  FaHome,
+  FaInfoCircle,
+  FaListAlt,
+  FaBars,
+  FaTimes,
+  FaUniversity,
+} from "react-icons/fa";
 import { Orbitron } from "next/font/google";
 
 const orbitron = Orbitron({ subsets: ["latin"], weight: ["700"] });
 
 export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
-  let status = "loading";
-  let session = null;
+
+  const navLinks = [
+    { href: "/", label: "Home", icon: <FaHome className="mr-2" /> },
+    {
+      href: "/create-institution",
+      label: "Institutions",
+      icon: <FaUniversity className="mr-2" />,
+    },
+    {
+      href: "/about",
+      label: "About",
+      icon: <FaInfoCircle className="mr-2" />,
+    },
+  ];
 
   return (
-    <nav className="bg-gradient-to-r from-indigo-500 via-purple-500 to-blue-500/90 backdrop-blur-sm shadow-md fixed w-full z-10 top-0 left-0">
-      <div className="mx-auto px-6 py-4 flex justify-between items-center max-md:px-4 max-sm:px-2">
-        
+    <nav className="fixed top-0 left-0 z-20 w-full bg-gradient-to-r from-indigo-500/95 via-purple-500/95 to-blue-500/95 backdrop-blur-md shadow-md">
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3 max-md:px-4 max-sm:px-3">
         {/* Logo */}
         <Link
           href="/"
-          className={`${orbitron.className} text-3xl font-bold text-white tracking-wide drop-shadow-md`}
+          className={`${orbitron.className} flex items-center gap-2 text-2xl font-extrabold tracking-wide text-white drop-shadow-md md:text-3xl`}
         >
-          TimetableGenie
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-white/15 text-sm shadow-sm">
+            ✨
+          </span>
+          <span>
+            Timetable
+            <span className="text-[#ffde59]">Genie</span>
+          </span>
         </Link>
+
+        {/* Desktop Nav */}
+        <div className="hidden items-center gap-2 md:flex">
+          {navLinks.map((link) => (
+            <Link key={link.href} href={link.href}>
+              <p className="group flex items-center rounded-full px-4 py-2 text-sm font-medium text-white/90 transition-all hover:bg-white/10 hover:text-[#ffde59]">
+                {link.icon}
+                <span>{link.label}</span>
+                <span className="ml-1 h-[2px] w-0 rounded-full bg-[#ffde59] transition-all group-hover:w-4" />
+              </p>
+            </Link>
+          ))}
+        </div>
 
         {/* Mobile Menu Button */}
         <button
-          className="block md:hidden text-white focus:outline-none relative z-20"
-          onClick={() => setMenuOpen(!menuOpen)}
+          className="relative z-30 block text-white md:hidden"
+          onClick={() => setMenuOpen((prev) => !prev)}
         >
-          {menuOpen ? <FaTimes className="text-2xl" /> : <FaBars className="text-2xl" />}
-        </button>
-
-        {/* Desktop Nav Links */}
-        <div className="hidden md:flex items-center space-x-6 text-lg text-white">
-          <Link href="/">
-            <p className="nav-link hover:text-[#ffda77] hover:scale-105 transform transition-all flex items-center">
-              <FaHome className="mr-2" />
-              Home
-            </p>
-          </Link>
-          <Link href="#">
-            <p className="nav-link hover:text-[#ffda77] hover:scale-105 transform transition-all flex items-center">
-              <FaListAlt className="mr-2" />
-              Time Tables
-            </p>
-          </Link>
-          <Link href="#">
-            <p className="nav-link hover:text-[#ffda77] hover:scale-105 transform transition-all flex items-center">
-              <FaInfoCircle className="mr-2" />
-              About
-            </p>
-          </Link>
-        </div>
-
-        {/* Mobile Menu */}
-        {menuOpen && (
-          <div className="absolute top-16 left-0 w-full bg-gradient-to-r from-indigo-500 via-purple-500 to-blue-500 shadow-lg flex flex-col items-center space-y-4 py-4 md:hidden">
-            <Link href="/">
-              <p
-                onClick={() => setMenuOpen(false)}
-                className="text-white text-lg hover:text-[#ffda77] transition-all"
-              >
-                <FaHome className="inline-block mr-2" />
-                Home
-              </p>
-            </Link>
-            <Link href="#">
-              <p
-                onClick={() => setMenuOpen(false)}
-                className="text-white text-lg hover:text-[#ffda77] transition-all"
-              >
-                <FaListAlt className="inline-block mr-2" />
-                Time Tables
-              </p>
-            </Link>
-            <Link href="#">
-              <p
-                onClick={() => setMenuOpen(false)}
-                className="text-white text-lg hover:text-[#ffda77] transition-all"
-              >
-                <FaInfoCircle className="inline-block mr-2" />
-                About
-              </p>
-            </Link>
-          </div>
-        )}
-
-        {/* Auth Section */}
-        <div className="relative ml-4 max-md:ml-2">
-          {status === "loading" ? (
-            <div className="w-10 h-10 rounded-full bg-gray-200 animate-pulse"></div>
-          ) : session ? (
-            <div className="group relative">
-              <button
-                // onClick={() => handleSignOut()}
-                className="flex items-center space-x-2 bg-white/20 hover:bg-white/30 px-4 py-2 max-md:px-3 max-md:py-1 rounded-lg transition-all"
-              >
-                <span className="text-white">Sign Out</span>
-              </button>
-              <span className="absolute left-1/2 -bottom-8 transform -translate-x-1/2 text-center text-xs text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap bg-purple-600 px-2 py-1 rounded">
-                {/* Signed in as: {session.user.email.split('@')[0]} */}
-              </span>
-            </div>
+          {menuOpen ? (
+            <FaTimes className="text-2xl" />
           ) : (
-            <Link
-              href="#"
-              className="flex items-center space-x-2 bg-white/20 hover:bg-white/30 px-4 py-2 max-md:px-3 max-md:py-1 rounded-lg transition-all"
-            >
-              <FaSignInAlt className="text-white" />
-              <span className="text-white">Sign In</span>
-            </Link>
+            <FaBars className="text-2xl" />
           )}
+        </button>
+      </div>
+
+      {/* Mobile Menu */}
+      <div
+        className={`md:hidden transition-all duration-300 ${menuOpen
+            ? "pointer-events-auto max-h-96 opacity-100"
+            : "pointer-events-none max-h-0 opacity-0"
+          }`}
+      >
+        <div className="flex flex-col gap-2 border-t border-white/15 bg-gradient-to-b from-indigo-600 via-purple-600 to-blue-600 px-6 pb-4 pt-3">
+          {navLinks.map((link) => (
+            <Link key={link.href} href={link.href}>
+              <p
+                onClick={() => setMenuOpen(false)}
+                className="flex items-center rounded-lg px-3 py-2 text-base font-medium text-white/95 transition-all hover:bg-white/10 hover:text-[#ffde59]"
+              >
+                {link.icon}
+                {link.label}
+              </p>
+            </Link>
+          ))}
         </div>
       </div>
     </nav>

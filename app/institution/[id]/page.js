@@ -355,20 +355,44 @@ const Institution = () => {
     };
 
     // Add semester to a branch
+    // Add semester to a branch
     const addSemester = (branchId) => {
         const storedBranches = JSON.parse(localStorage.getItem('branches')) || [];
         const updatedBranches = storedBranches.map(branch => {
-            if (branch.branchId === branchId && branch.semesters.length < 5) {
-                const lastSemester = branch.semesters[branch.semesters.length - 1];
-                const lastNumber = parseInt(lastSemester.semesterName.split(' ')[1]);
+            if (branch.branchId === branchId) {
+                // Initialize semesters array if it doesn't exist
+                const semesters = branch.semesters || [];
+
+                // Check if we can add more semesters (max 10 semesters)
+                if (semesters.length >= 10) {
+                    toast.error('Maximum 10 semesters allowed per branch');
+                    return branch;
+                }
+
+                // Calculate the next semester number
+                let nextSemesterNumber = 1;
+                if (semesters.length > 0) {
+                    const lastSemester = semesters[semesters.length - 1];
+                    // Extract number from semester name (e.g., "Semester 1" -> 1)
+                    const lastNumber = parseInt(lastSemester.semesterName.split(' ')[1]) || 0;
+                    nextSemesterNumber = lastNumber + 2; // Add 2 to maintain odd/even pattern
+                }
+
                 const newSemester = {
-                    semesterName: `Semester ${lastNumber + 2}`,
-                    sections: 1
+                    semesterName: `Semester ${nextSemesterNumber}`,
+                    sections: 1,
+                    sectionNames: ["Section A"],
+                    semesterId: `${Date.now()}${Math.random().toString(36).substring(2, 8)}`
                 };
-                return { ...branch, semesters: [...branch.semesters, newSemester] };
+
+                return {
+                    ...branch,
+                    semesters: [...semesters, newSemester]
+                };
             }
             return branch;
         });
+
         localStorage.setItem('branches', JSON.stringify(updatedBranches));
         setCurrentBranches(updatedBranches.filter(branch => branch.instituteId === id));
         toast.success('Semester added successfully', { position: 'top-center' });

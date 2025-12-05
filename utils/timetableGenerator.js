@@ -1,23 +1,26 @@
 'use client';
 
+// PURE LOCAL TIMETABLE GENERATOR
+// No API keys, no network calls. Works only with data you already have.
+
 export async function generateTimetableForSections(config, facultyData, labRoomsData, branchData) {
     console.log('🚀 Starting SIMPLIFIED timetable generation...');
 
     try {
         // ================== 1. PARSE INPUT DATA ==================
-        const days = config.saturdayPeriods > 0 
-            ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] 
+        const days = config.saturdayPeriods > 0
+            ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
             : ["Mon", "Tue", "Wed", "Thu", "Fri"];
-        
+
         const weekdayPeriods = config.weekdayPeriods || 6;
         const saturdayPeriods = config.saturdayPeriods || 0;
-        const shortBreak = config.shortBreakAfter || 2;
-        const lunchBreak = config.lunchBreakAfter || 4;
-        
+        const shortBreak = config.shortBreakAfter || 2; // break AFTER this period
+        const lunchBreak = config.lunchBreakAfter || 4; // break AFTER this period
+
         const sections = parseInt(branchData.sections) || 1;
-        const sectionNames = branchData.sectionNames || 
-            Array.from({length: sections}, (_, i) => `Section ${String.fromCharCode(65 + i)}`);
-        
+        const sectionNames = branchData.sectionNames ||
+            Array.from({ length: sections }, (_, i) => `Section ${String.fromCharCode(65 + i)}`);
+
         const subjects = config.subjects || [];
         const labs = config.labs || [];
 
@@ -41,19 +44,22 @@ export async function generateTimetableForSections(config, facultyData, labRooms
             if (!subject.name || subject.name.trim() === '') {
                 return {
                     success: false,
-                    error: `Subject missing name. All subjects must have names.`
+                    error: `Subject missing name. All subjects must have names.`,
+                    sectionTimetables: null
                 };
             }
             if (!subject.teachers || subject.teachers.length === 0) {
                 return {
                     success: false,
-                    error: `Subject "${subject.name}" has no teachers assigned.`
+                    error: `Subject "${subject.name}" has no teachers assigned.`,
+                    sectionTimetables: null
                 };
             }
             if (subject.frequency < 1) {
                 return {
                     success: false,
-                    error: `Subject "${subject.name}" frequency must be at least 1.`
+                    error: `Subject "${subject.name}" frequency must be at least 1.`,
+                    sectionTimetables: null
                 };
             }
         }
@@ -63,42 +69,45 @@ export async function generateTimetableForSections(config, facultyData, labRooms
             if (!lab.name || lab.name.trim() === '') {
                 return {
                     success: false,
-                    error: `Lab missing name. All labs must have names.`
+                    error: `Lab missing name. All labs must have names.`,
+                    sectionTimetables: null
                 };
             }
             if (!lab.teachers || lab.teachers.length === 0) {
                 return {
                     success: false,
-                    error: `Lab "${lab.name}" has no teachers assigned.`
+                    error: `Lab "${lab.name}" has no teachers assigned.`,
+                    sectionTimetables: null
                 };
             }
             if (lab.frequency < 1) {
                 return {
                     success: false,
-                    error: `Lab "${lab.name}" frequency must be at least 1.`
+                    error: `Lab "${lab.name}" frequency must be at least 1.`,
+                    sectionTimetables: null
                 };
             }
         }
 
         // Validate faculty
-        const validFaculty = facultyData.filter(teacher => 
+        const validFaculty = facultyData.filter(teacher =>
             teacher && teacher.teacherId && teacher.name
         );
         if (validFaculty.length === 0) {
             return {
                 success: false,
-                error: `No valid faculty data found. Please add teachers first.`
+                error: `No valid faculty data found. Please add teachers first.`,
+                sectionTimetables: null
             };
         }
 
         // ================== 3. CREATE DATA STRUCTURES ==================
-        // Teacher map for quick access
+        // Teacher map for quick access (SHARED across sections → prevents double booking)
         const teacherMap = new Map();
         validFaculty.forEach(teacher => {
             teacherMap.set(teacher.teacherId, {
                 ...teacher,
-                // Ensure unavailability exists
-                unavailability: teacher.unavailability || {}
+                unavailability: teacher.unavailability || {} // e.g. { "Mon-1": { unavailable: true }, ... }
             });
         });
 
@@ -116,44 +125,44 @@ export async function generateTimetableForSections(config, facultyData, labRooms
             return day === "Sat" ? saturdayPeriods : weekdayPeriods;
         }
 
-        function isBreakPeriod(day, period) {
+        // We do NOT treat short/lunch as non-teaching periods here.
+        // They are conceptual breaks BETWEEN periods.
+        function isBreakPeriod(day, periodIndex) {
             const periodsCount = getPeriodsForDay(day);
-            return period >= periodsCount || 
-                   period === shortBreak - 1 || 
-                   period === lunchBreak - 1;
+            return periodIndex >= periodsCount; // only out-of-range
         }
 
-        function isTeacherAvailable(teacherId, day, period) {
+        function isTeacherAvailable(teacherId, day, periodNumber) {
             const teacher = teacherMap.get(teacherId);
             if (!teacher) return false;
-            
-            const slotKey = `${day}-${period}`;
+
+            const slotKey = `${day}-${periodNumber}`; // e.g., "Mon-1"
             const slot = teacher.unavailability[slotKey];
-            
+
             // If no data, assume available
             if (!slot) return true;
-            
+
             // Check if marked as unavailable or already allocated
             return !slot.unavailable && !slot.allocated;
         }
 
-        function isLabRoomAvailable(labRoomId, day, period) {
-            if (!labRoomId) return true; // Lab room optional
-            
+        function isLabRoomAvailable(labRoomId, day, periodNumber) {
+            if (!labRoomId) return true;
+
             const labRoom = labRoomMap.get(labRoomId);
             if (!labRoom) return false;
-            
-            const slotKey = `${day}-${period}`;
+
+            const slotKey = `${day}-${periodNumber}`;
             const slot = labRoom.unavailability[slotKey];
-            
+
             if (!slot) return true;
             return !slot.unavailable && !slot.allocated;
         }
 
-        function markTeacherAllocated(teacherId, day, period) {
+        function markTeacherAllocated(teacherId, day, periodNumber) {
             const teacher = teacherMap.get(teacherId);
             if (teacher) {
-                const slotKey = `${day}-${period}`;
+                const slotKey = `${day}-${periodNumber}`;
                 teacher.unavailability[slotKey] = {
                     ...teacher.unavailability[slotKey],
                     allocated: true,
@@ -162,18 +171,27 @@ export async function generateTimetableForSections(config, facultyData, labRooms
             }
         }
 
-        function markLabRoomAllocated(labRoomId, day, period) {
+        function markLabRoomAllocated(labRoomId, day, periodNumber) {
             if (!labRoomId) return;
-            
+
             const labRoom = labRoomMap.get(labRoomId);
             if (labRoom) {
-                const slotKey = `${day}-${period}`;
+                const slotKey = `${day}-${periodNumber}`;
                 labRoom.unavailability[slotKey] = {
                     ...labRoom.unavailability[slotKey],
                     allocated: true,
                     message: 'In use'
                 };
             }
+        }
+
+        function shuffleArray(array) {
+            const copy = [...array];
+            for (let i = copy.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [copy[i], copy[j]] = [copy[j], copy[i]];
+            }
+            return copy;
         }
 
         // ================== 5. GENERATE TIMETABLE ==================
@@ -192,13 +210,12 @@ export async function generateTimetableForSections(config, facultyData, labRooms
                 timetable[day] = new Array(getPeriodsForDay(day)).fill(null);
             }
 
-            // Reset teacher availability for this section
-            // (We'll create a fresh copy for each section)
+            // For label display only (names), we can keep a copy per section
             const sectionTeacherMap = new Map();
             teacherMap.forEach((teacher, id) => {
                 sectionTeacherMap.set(id, {
                     ...teacher,
-                    unavailability: { ...teacher.unavailability } // Shallow copy
+                    unavailability: { ...teacher.unavailability }
                 });
             });
 
@@ -210,243 +227,369 @@ export async function generateTimetableForSections(config, facultyData, labRooms
                 });
             });
 
-            // === STEP 1: PLACE LABS ===
-            console.log('  🧪 Placing labs...');
-            let labsPlacedSuccessfully = true;
+            // ---------- LAB PLACEMENT HELPERS ----------
 
-            for (const lab of labs) {
-                console.log(`    Lab: ${lab.name} (Frequency: ${lab.frequency})`);
-                
-                let placedCount = 0;
-                let attempts = 0;
-                const maxAttempts = 200;
+            function canPlaceLabSlot(day, startIndex, lab, teacherId, attempts) {
+                const dayPeriods = getPeriodsForDay(day);
+                const p1Index = startIndex;
+                const p2Index = startIndex + 1;
+                const p1Number = p1Index + 1;
+                const p2Number = p2Index + 1;
 
-                while (placedCount < lab.frequency && attempts < maxAttempts) {
-                    attempts++;
-                    
-                    // Try random day and period
-                    const randomDay = days[Math.floor(Math.random() * days.length)];
-                    const periodsCount = getPeriodsForDay(randomDay);
-                    
-                    // We need 2 consecutive periods for lab
-                    if (periodsCount < 2) {
-                        console.log(`      ❌ Not enough periods on ${randomDay} for lab`);
-                        break;
+                if (p2Index >= dayPeriods) return false;
+
+                // Do not start a lab where it would cross short or lunch break
+                // If short break is after period 2, then break is between 2 and 3,
+                // so a lab starting at period 2 (using 2 & 3) must be avoided.
+                if (p1Number === shortBreak || p1Number === lunchBreak) return false;
+
+                // Slots must be empty
+                if (timetable[day][p1Index] !== null || timetable[day][p2Index] !== null) return false;
+
+                // Teacher must be free in both periods
+                if (!isTeacherAvailable(teacherId, day, p1Number) || !isTeacherAvailable(teacherId, day, p2Number)) {
+                    return false;
+                }
+
+                // Lab room if any
+                const labRoomId = lab.labRoom;
+                if (labRoomId && labRoomId.trim() !== '') {
+                    if (!isLabRoomAvailable(labRoomId, day, p1Number) || !isLabRoomAvailable(labRoomId, day, p2Number)) {
+                        return false;
                     }
-                    
-                    // Try random starting period (0 to periodsCount-2)
-                    const startPeriod = Math.floor(Math.random() * (periodsCount - 1));
-                    
-                    // Check constraints
-                    if (isBreakPeriod(randomDay, startPeriod) || 
-                        isBreakPeriod(randomDay, startPeriod + 1)) {
-                        continue;
-                    }
-                    
-                    // Check if slots are free
-                    if (timetable[randomDay][startPeriod] !== null || 
-                        timetable[randomDay][startPeriod + 1] !== null) {
-                        continue;
-                    }
-                    
-                    // Check teacher availability
-                    const availableTeacher = lab.teachers.find(teacherId => {
-                        if (!teacherId || teacherId.trim() === '') return false;
-                        
-                        const teacher = sectionTeacherMap.get(teacherId);
-                        if (!teacher) {
-                            console.log(`      ❌ Teacher ${teacherId} not found`);
-                            return false;
-                        }
-                        
-                        return isTeacherAvailable(teacherId, randomDay, startPeriod + 1) &&
-                               isTeacherAvailable(teacherId, randomDay, startPeriod + 2);
-                    });
-                    
-                    if (!availableTeacher) {
-                        continue;
-                    }
-                    
-                    // Check lab room availability (optional)
-                    const labRoomId = lab.labRoom;
-                    if (labRoomId && labRoomId.trim() !== '') {
-                        const labRoom = sectionLabRoomMap.get(labRoomId);
-                        if (!labRoom) {
-                            console.log(`      ❌ Lab room ${labRoomId} not found`);
-                            continue;
-                        }
-                        
-                        if (!isLabRoomAvailable(labRoomId, randomDay, startPeriod + 1) ||
-                            !isLabRoomAvailable(labRoomId, randomDay, startPeriod + 2)) {
-                            continue;
-                        }
-                    }
-                    
-                    // PLACE THE LAB
-                    console.log(`      ✅ Placing at ${randomDay} periods ${startPeriod + 1}-${startPeriod + 2}`);
-                    
-                    const labEntry = {
-                        type: 'lab',
-                        name: lab.name,
-                        labId: lab.id,
-                        teacherId: availableTeacher,
-                        teacherName: sectionTeacherMap.get(availableTeacher)?.name,
-                        labRoomId: labRoomId || null,
-                        labRoomName: labRoomId ? sectionLabRoomMap.get(labRoomId)?.labName : null,
-                        section: sectionName,
-                        duration: 2
+                }
+
+                // No adjacent labs immediately before/after
+                const prev = p1Index - 1 >= 0 ? timetable[day][p1Index - 1] : null;
+                const next = p2Index + 1 < dayPeriods ? timetable[day][p2Index + 1] : null;
+                if ((prev && prev.type === 'lab') || (next && next.type === 'lab')) return false;
+
+                // Avoid same lab twice on same day
+                if (timetable[day].some(slot => slot && slot.type === 'lab' && slot.name === lab.name)) {
+                    return false;
+                }
+
+                // Optional: avoid same lab in same position on adjacent days (for first few attempts)
+                if (attempts < 50) {
+                    const dayIndex = days.indexOf(day);
+                    const checkNeighbours = (neighbourDay) => {
+                        const neighbourSlots = timetable[neighbourDay];
+                        if (!neighbourSlots) return false;
+                        const s1 = neighbourSlots[p1Index];
+                        const s2 = neighbourSlots[p2Index];
+                        return (s1 && s1.type === 'lab' && s1.name === lab.name) ||
+                               (s2 && s2.type === 'lab' && s2.name === lab.name);
                     };
-                    
-                    // Mark both periods
-                    timetable[randomDay][startPeriod] = labEntry;
-                    timetable[randomDay][startPeriod + 1] = labEntry;
-                    
-                    // Mark teacher and lab room as allocated
-                    markTeacherAllocated(availableTeacher, randomDay, startPeriod + 1);
-                    markTeacherAllocated(availableTeacher, randomDay, startPeriod + 2);
-                    
-                    if (labRoomId) {
-                        markLabRoomAllocated(labRoomId, randomDay, startPeriod + 1);
-                        markLabRoomAllocated(labRoomId, randomDay, startPeriod + 2);
-                    }
-                    
-                    placedCount++;
+                    if (dayIndex > 0 && checkNeighbours(days[dayIndex - 1])) return false;
+                    if (dayIndex < days.length - 1 && checkNeighbours(days[dayIndex + 1])) return false;
                 }
-                
-                if (placedCount < lab.frequency) {
-                    console.log(`    ❌ Failed to place lab "${lab.name}" - placed ${placedCount}/${lab.frequency}`);
-                    labsPlacedSuccessfully = false;
-                    break;
-                }
-            }
-            
-            if (!labsPlacedSuccessfully) {
-                console.log(`  ❌ Failed to place all labs for ${sectionName}`);
-                allSectionsSuccessful = false;
-                break;
-            }
-            
-            console.log(`  ✅ All labs placed for ${sectionName}`);
 
-            // === STEP 2: PLACE SUBJECTS ===
-            console.log('  📚 Placing subjects...');
-            let subjectsPlacedSuccessfully = true;
-            
-            // Create list of all subject sessions needed
+                return true;
+            }
+
+            function placeLabsForSection(maxRetries = 10) {
+                let retries = 0;
+
+                // We'll track counts per lab.id
+                const labFrequencyMap = {};
+                labs.forEach(l => {
+                    labFrequencyMap[l.id] = l.frequency || 1;
+                });
+
+                // local counts for this section
+                let labPlacedCount = {};
+                labs.forEach(l => { labPlacedCount[l.id] = 0; });
+
+                while (retries < maxRetries) {
+                    let success = true;
+
+                    // Clear timetable for labs on retry
+                    for (const day of days) {
+                        timetable[day] = new Array(getPeriodsForDay(day)).fill(null);
+                    }
+                    // Reset counts
+                    labs.forEach(l => { labPlacedCount[l.id] = 0; });
+
+                    // Place each lab
+                    for (const lab of labs) {
+                        const targetFreq = labFrequencyMap[lab.id] || 0;
+
+                        while (labPlacedCount[lab.id] < targetFreq) {
+                            let placed = false;
+                            let attempts = 0;
+
+                            while (!placed && attempts < 100) {
+                                attempts++;
+                                const randomDay = days[Math.floor(Math.random() * days.length)];
+                                const dayPeriods = getPeriodsForDay(randomDay);
+
+                                if (dayPeriods < 2) break;
+
+                                const startIndex = Math.floor(Math.random() * (dayPeriods - 1));
+
+                                // Try all teachers for this lab
+                                for (const teacherId of lab.teachers) {
+                                    if (!teacherId || teacherId.trim() === '') continue;
+
+                                    if (canPlaceLabSlot(randomDay, startIndex, lab, teacherId, attempts)) {
+                                        const p1Index = startIndex;
+                                        const p2Index = startIndex + 1;
+                                        const p1Number = p1Index + 1;
+                                        const p2Number = p2Index + 1;
+
+                                        console.log(`      ✅ Placing lab "${lab.name}" for ${sectionName} at ${randomDay} P${p1Number}-P${p2Number} with teacher ${teacherId}`);
+
+                                        const labRoomId = lab.labRoom && lab.labRoom.trim() !== '' ? lab.labRoom : null;
+                                        const labEntry = {
+                                            type: 'lab',
+                                            name: lab.name,
+                                            labId: lab.id,
+                                            teacherId,
+                                            teacherName: sectionTeacherMap.get(teacherId)?.name,
+                                            labRoomId,
+                                            labRoomName: labRoomId ? sectionLabRoomMap.get(labRoomId)?.labName : null,
+                                            section: sectionName,
+                                            duration: 2
+                                        };
+
+                                        timetable[randomDay][p1Index] = labEntry;
+                                        timetable[randomDay][p2Index] = labEntry;
+
+                                        markTeacherAllocated(teacherId, randomDay, p1Number);
+                                        markTeacherAllocated(teacherId, randomDay, p2Number);
+
+                                        if (labRoomId) {
+                                            markLabRoomAllocated(labRoomId, randomDay, p1Number);
+                                            markLabRoomAllocated(labRoomId, randomDay, p2Number);
+                                        }
+
+                                        labPlacedCount[lab.id] += 1;
+                                        placed = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (!placed) {
+                                console.log(`    ❌ Failed to place lab "${lab.name}" (section ${sectionName}) after many attempts`);
+                                success = false;
+                                break;
+                            }
+                        }
+
+                        if (!success) break;
+                    }
+
+                    if (success) {
+                        return true;
+                    }
+
+                    retries++;
+                    console.log(`  🔁 Retrying lab placement for ${sectionName} (attempt ${retries + 1}/${maxRetries})`);
+                }
+
+                return false;
+            }
+
+            // ---------- SUBJECT PLACEMENT HELPERS ----------
+
+            // Build subject sessions (like your previous code)
             const subjectSessions = [];
             subjects.forEach(subject => {
-                for (let i = 0; i < subject.frequency; i++) {
+                const freq = subject.frequency || 1;
+                for (let i = 0; i < freq; i++) {
                     subjectSessions.push({
                         ...subject,
                         sessionId: `${subject.id}-${i}`
                     });
                 }
             });
-            
-            console.log(`    Need to place ${subjectSessions.length} subject sessions`);
-            
-            // Simple algorithm: try each available slot
+
+            // Track how many times each subject appears per day (max 2 per day, like your earlier logic)
+            const dailySubjectCount = {};
             for (const day of days) {
-                const periodsCount = getPeriodsForDay(day);
-                
-                for (let period = 0; period < periodsCount; period++) {
-                    // Skip if slot is occupied or break period
-                    if (timetable[day][period] !== null || isBreakPeriod(day, period)) {
-                        continue;
+                dailySubjectCount[day] = {};
+                subjects.forEach(sub => {
+                    dailySubjectCount[day][sub.id] = 0;
+                });
+            }
+
+            function findAvailableTeacherForSubject(day, periodNumber, subject) {
+                // Choose first teacher who is free
+                for (const teacherId of subject.teachers) {
+                    if (!teacherId || teacherId.trim() === '') continue;
+                    if (isTeacherAvailable(teacherId, day, periodNumber)) {
+                        return teacherId;
                     }
-                    
-                    // Try to find a subject that fits
-                    for (let i = 0; i < subjectSessions.length; i++) {
-                        const subject = subjectSessions[i];
-                        
-                        // Find an available teacher for this subject
-                        const availableTeacher = subject.teachers.find(teacherId => {
-                            if (!teacherId || teacherId.trim() === '') return false;
-                            return isTeacherAvailable(teacherId, day, period + 1);
-                        });
-                        
-                        if (availableTeacher) {
-                            // Place the subject
-                            console.log(`      ✅ Placing ${subject.name} at ${day} period ${period + 1}`);
-                            
-                            timetable[day][period] = {
-                                type: 'subject',
-                                name: subject.name,
-                                subjectId: subject.id,
-                                teacherId: availableTeacher,
-                                teacherName: sectionTeacherMap.get(availableTeacher)?.name,
-                                section: sectionName,
-                                duration: 1
-                            };
-                            
-                            // Mark teacher as allocated
-                            markTeacherAllocated(availableTeacher, day, period + 1);
-                            
-                            // Remove from pending sessions
-                            subjectSessions.splice(i, 1);
-                            break;
+                }
+                return null;
+            }
+
+            function canPlaceSubjectSlot(day, periodIndex, subject, teacherId, attempts) {
+                const dayPeriods = getPeriodsForDay(day);
+                if (periodIndex >= dayPeriods) return false;
+
+                if (timetable[day][periodIndex] !== null) return false;
+
+                const periodNumber = periodIndex + 1;
+
+                // Teacher availability
+                if (!isTeacherAvailable(teacherId, day, periodNumber)) return false;
+
+                // No same subject adjacent on this day
+                const prev = periodIndex > 0 ? timetable[day][periodIndex - 1] : null;
+                const next = periodIndex + 1 < dayPeriods ? timetable[day][periodIndex + 1] : null;
+                if ((prev && prev.subjectId === subject.id) || (next && next.subjectId === subject.id)) {
+                    return false;
+                }
+
+                // At most 2 slots per day for the same subject
+                if (dailySubjectCount[day][subject.id] >= 2) {
+                    return false;
+                }
+
+                // Optional: extra safeguard similar to your old code
+                if (attempts <= 30) {
+                    let dailyCount = 0;
+                    for (let i = 0; i < dayPeriods; i++) {
+                        const slot = timetable[day][i];
+                        if (slot && slot.subjectId === subject.id) {
+                            dailyCount++;
+                            if (dailyCount >= 2) return false;
                         }
                     }
-                    
-                    if (subjectSessions.length === 0) break;
                 }
-                if (subjectSessions.length === 0) break;
+
+                return true;
             }
-            
-            // If we still have subjects left, try more aggressively
-            if (subjectSessions.length > 0) {
-                console.log(`    ${subjectSessions.length} subjects remaining, trying alternative placement...`);
-                
-                // Try all possible slots again, including checking if we can move things around
-                for (const day of days) {
-                    const periodsCount = getPeriodsForDay(day);
-                    
-                    for (let period = 0; period < periodsCount; period++) {
-                        if (timetable[day][period] === null && !isBreakPeriod(day, period)) {
-                            // This is an empty slot, try to place any subject
-                            for (let i = 0; i < subjectSessions.length; i++) {
-                                const subject = subjectSessions[i];
-                                const availableTeacher = subject.teachers.find(teacherId => 
-                                    teacherId && isTeacherAvailable(teacherId, day, period + 1)
-                                );
-                                
-                                if (availableTeacher) {
-                                    timetable[day][period] = {
-                                        type: 'subject',
-                                        name: subject.name,
-                                        subjectId: subject.id,
-                                        teacherId: availableTeacher,
-                                        teacherName: sectionTeacherMap.get(availableTeacher)?.name,
-                                        section: sectionName,
-                                        duration: 1
-                                    };
-                                    
-                                    markTeacherAllocated(availableTeacher, day, period + 1);
-                                    subjectSessions.splice(i, 1);
-                                    console.log(`      ✅ Placed remaining ${subject.name} at ${day} period ${period + 1}`);
-                                    break;
-                                }
-                            }
-                        }
-                        if (subjectSessions.length === 0) break;
-                    }
-                    if (subjectSessions.length === 0) break;
-                }
-            }
-            
-            if (subjectSessions.length > 0) {
-                console.log(`    ⚠️ Could not place ${subjectSessions.length} subjects`);
-                console.log('    Unplaced subjects:', subjectSessions.map(s => s.name));
-                subjectsPlacedSuccessfully = false;
-            } else {
-                console.log(`  ✅ All subjects placed for ${sectionName}`);
-            }
-            
-            if (!subjectsPlacedSuccessfully) {
+
+            // ---------- STEP 1: PLACE LABS (WITH RETRIES) ----------
+            console.log('  🧪 Placing labs for', sectionName);
+            const labsPlaced = placeLabsForSection();
+            if (!labsPlaced) {
+                console.log(`  ❌ Failed to place all labs for ${sectionName}`);
                 allSectionsSuccessful = false;
                 break;
             }
-            
+            console.log(`  ✅ All labs placed for ${sectionName}`);
+
+            // ---------- STEP 2: PLACE SUBJECTS ----------
+            console.log('  📚 Placing subjects for', sectionName);
+            console.log(`    Need to place ${subjectSessions.length} subject sessions`);
+
+            // A. Fill periods BEFORE labs on each day
+            for (const day of days) {
+                const dayPeriods = getPeriodsForDay(day);
+
+                // Find lab starting indices on this day
+                const labStartIndices = [];
+                for (let p = 0; p < dayPeriods; p++) {
+                    const slot = timetable[day][p];
+                    if (slot && slot.type === 'lab') {
+                        if (p === 0 || timetable[day][p - 1] !== slot) {
+                            labStartIndices.push(p);
+                        }
+                    }
+                }
+
+                labStartIndices.sort((a, b) => a - b);
+
+                for (const labStart of labStartIndices) {
+                    // Fill periods from 0 to labStart-1
+                    for (let periodIndex = 0; periodIndex < labStart; periodIndex++) {
+                        if (timetable[day][periodIndex] !== null) continue;
+
+                        let attempts = 0;
+                        let placed = false;
+
+                        while (!placed && attempts < 50 && subjectSessions.length > 0) {
+                            attempts++;
+
+                            const randomIndex = Math.floor(Math.random() * subjectSessions.length);
+                            const candidate = subjectSessions[randomIndex];
+                            const periodNumber = periodIndex + 1;
+
+                            const teacherId = findAvailableTeacherForSubject(day, periodNumber, candidate);
+                            if (!teacherId) continue;
+
+                            if (canPlaceSubjectSlot(day, periodIndex, candidate, teacherId, attempts)) {
+                                timetable[day][periodIndex] = {
+                                    type: 'subject',
+                                    name: candidate.name,
+                                    subjectId: candidate.id,
+                                    teacherId,
+                                    teacherName: sectionTeacherMap.get(teacherId)?.name,
+                                    section: sectionName,
+                                    duration: 1
+                                };
+
+                                markTeacherAllocated(teacherId, day, periodNumber);
+                                dailySubjectCount[day][candidate.id] += 1;
+
+                                subjectSessions.splice(randomIndex, 1);
+                                placed = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // B. Place remaining subjects period-wise across days (P1 on all days, then P2, ...)
+            // This gives the "morning first" feel overall.
+            const maxPeriods = weekdayPeriods; // maximum any non-Sat day can have
+
+            for (let periodIndex = 0; periodIndex < maxPeriods && subjectSessions.length > 0; periodIndex++) {
+                const shuffledDays = shuffleArray(days);
+
+                for (const day of shuffledDays) {
+                    const dayPeriods = getPeriodsForDay(day);
+                    if (periodIndex >= dayPeriods) continue; // this period doesn't exist on this day
+
+                    if (timetable[day][periodIndex] !== null) continue; // already lab or subject
+
+                    let attempts = 0;
+                    let placed = false;
+
+                    while (!placed && attempts < 50 && subjectSessions.length > 0) {
+                        attempts++;
+
+                        const randomIndex = Math.floor(Math.random() * subjectSessions.length);
+                        const candidate = subjectSessions[randomIndex];
+                        const periodNumber = periodIndex + 1;
+
+                        const teacherId = findAvailableTeacherForSubject(day, periodNumber, candidate);
+                        if (!teacherId) continue;
+
+                        if (canPlaceSubjectSlot(day, periodIndex, candidate, teacherId, attempts)) {
+                            timetable[day][periodIndex] = {
+                                type: 'subject',
+                                name: candidate.name,
+                                subjectId: candidate.id,
+                                teacherId,
+                                teacherName: sectionTeacherMap.get(teacherId)?.name,
+                                section: sectionName,
+                                duration: 1
+                            };
+
+                            markTeacherAllocated(teacherId, day, periodNumber);
+                            dailySubjectCount[day][candidate.id] += 1;
+
+                            subjectSessions.splice(randomIndex, 1);
+                            placed = true;
+                        }
+                    }
+                }
+            }
+
+            if (subjectSessions.length > 0) {
+                console.log(`    ⚠️ Could not place ${subjectSessions.length} subject sessions for ${sectionName}`);
+                console.log('    Unplaced subjects:', subjectSessions.map(s => s.name));
+                allSectionsSuccessful = false;
+                break;
+            } else {
+                console.log(`  ✅ All subjects placed for ${sectionName}`);
+            }
+
             // Save this section's timetable
             sectionTimetables[sectionName] = timetable;
             console.log(`🎉 Completed timetable for ${sectionName}`);
@@ -469,7 +612,7 @@ export async function generateTimetableForSections(config, facultyData, labRooms
             };
         }
 
-        // Calculate statistics
+        // Stats
         let totalPeriodsScheduled = 0;
         Object.values(sectionTimetables).forEach(timetable => {
             Object.values(timetable).forEach(daySlots => {
@@ -495,7 +638,10 @@ export async function generateTimetableForSections(config, facultyData, labRooms
                 totalPeriodsScheduled,
                 totalSubjects: subjects.reduce((sum, s) => sum + s.frequency, 0),
                 totalLabs: labs.reduce((sum, l) => sum + l.frequency, 0),
-                utilization: Math.round((totalPeriodsScheduled / (sections * days.length * weekdayPeriods)) * 100) + '%'
+                utilization:
+                    Math.round(
+                        (totalPeriodsScheduled / (sections * days.length * weekdayPeriods)) * 100
+                    ) + '%'
             },
             generatedAt: new Date().toISOString()
         };
@@ -504,20 +650,6 @@ export async function generateTimetableForSections(config, facultyData, labRooms
         console.log('🎉 TIMETABLE GENERATION COMPLETE!');
         console.log('==========================================');
         console.log('📊 Statistics:', result.statistics);
-        
-        // Log sample timetable
-        const firstSection = sectionNames[0];
-        if (sectionTimetables[firstSection]) {
-            console.log('\n📅 Sample timetable (Monday - First Section):');
-            const mondaySlots = sectionTimetables[firstSection].Mon || [];
-            mondaySlots.forEach((slot, index) => {
-                if (slot) {
-                    console.log(`  Period ${index + 1}: ${slot.type === 'subject' ? '📚' : '🧪'} ${slot.name} - ${slot.teacherName}`);
-                } else {
-                    console.log(`  Period ${index + 1}: Free`);
-                }
-            });
-        }
 
         return result;
 
@@ -531,6 +663,1005 @@ export async function generateTimetableForSections(config, facultyData, labRooms
         };
     }
 }
+
+
+// 'use client';
+
+// // PURE LOCAL TIMETABLE GENERATOR
+// // No API keys, no network calls. Works only with data you already have.
+
+// export async function generateTimetableForSections(config, facultyData, labRoomsData, branchData) {
+//     console.log('🚀 Starting SIMPLIFIED timetable generation...');
+
+//     try {
+//         // ================== 1. PARSE INPUT DATA ==================
+//         const days = config.saturdayPeriods > 0 
+//             ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] 
+//             : ["Mon", "Tue", "Wed", "Thu", "Fri"];
+        
+//         const weekdayPeriods = config.weekdayPeriods || 6;
+//         const saturdayPeriods = config.saturdayPeriods || 0;
+//         const shortBreak = config.shortBreakAfter || 2;
+//         const lunchBreak = config.lunchBreakAfter || 4;
+        
+//         const sections = parseInt(branchData.sections) || 1;
+//         const sectionNames = branchData.sectionNames || 
+//             Array.from({length: sections}, (_, i) => `Section ${String.fromCharCode(65 + i)}`);
+        
+//         const subjects = config.subjects || [];
+//         const labs = config.labs || [];
+
+//         console.log('📊 Summary:', {
+//             days,
+//             weekdayPeriods,
+//             saturdayPeriods,
+//             shortBreak,
+//             lunchBreak,
+//             sections,
+//             sectionNames,
+//             subjectCount: subjects.length,
+//             labCount: labs.length,
+//             facultyCount: facultyData.length,
+//             labRoomCount: labRoomsData.length
+//         });
+
+//         // ================== 2. VALIDATE DATA ==================
+//         // Validate subjects
+//         for (const subject of subjects) {
+//             if (!subject.name || subject.name.trim() === '') {
+//                 return {
+//                     success: false,
+//                     error: `Subject missing name. All subjects must have names.`,
+//                     sectionTimetables: null
+//                 };
+//             }
+//             if (!subject.teachers || subject.teachers.length === 0) {
+//                 return {
+//                     success: false,
+//                     error: `Subject "${subject.name}" has no teachers assigned.`,
+//                     sectionTimetables: null
+//                 };
+//             }
+//             if (subject.frequency < 1) {
+//                 return {
+//                     success: false,
+//                     error: `Subject "${subject.name}" frequency must be at least 1.`,
+//                     sectionTimetables: null
+//                 };
+//             }
+//         }
+
+//         // Validate labs
+//         for (const lab of labs) {
+//             if (!lab.name || lab.name.trim() === '') {
+//                 return {
+//                     success: false,
+//                     error: `Lab missing name. All labs must have names.`,
+//                     sectionTimetables: null
+//                 };
+//             }
+//             if (!lab.teachers || lab.teachers.length === 0) {
+//                 return {
+//                     success: false,
+//                     error: `Lab "${lab.name}" has no teachers assigned.`,
+//                     sectionTimetables: null
+//                 };
+//             }
+//             if (lab.frequency < 1) {
+//                 return {
+//                     success: false,
+//                     error: `Lab "${lab.name}" frequency must be at least 1.`,
+//                     sectionTimetables: null
+//                 };
+//             }
+//         }
+
+//         // Validate faculty
+//         const validFaculty = facultyData.filter(teacher => 
+//             teacher && teacher.teacherId && teacher.name
+//         );
+//         if (validFaculty.length === 0) {
+//             return {
+//                 success: false,
+//                 error: `No valid faculty data found. Please add teachers first.`,
+//                 sectionTimetables: null
+//             };
+//         }
+
+//         // ================== 3. CREATE DATA STRUCTURES ==================
+//         // Teacher map for quick access
+//         const teacherMap = new Map();
+//         validFaculty.forEach(teacher => {
+//             // Ensure unavailability exists and is in the right format (Day-PeriodNumber)
+//             teacherMap.set(teacher.teacherId, {
+//                 ...teacher,
+//                 unavailability: teacher.unavailability || {}
+//             });
+//         });
+
+//         // Lab room map
+//         const labRoomMap = new Map();
+//         labRoomsData.forEach(labRoom => {
+//             labRoomMap.set(labRoom.labId, {
+//                 ...labRoom,
+//                 unavailability: labRoom.unavailability || {}
+//             });
+//         });
+
+//         // ================== 4. HELPER FUNCTIONS ==================
+//         function getPeriodsForDay(day) {
+//             return day === "Sat" ? saturdayPeriods : weekdayPeriods;
+//         }
+
+//         // NOTE:
+//         // This is a simple "break period" helper.
+//         // For now, we keep it like your original code:
+//         // It treats the period index (shortBreak-1) and (lunchBreak-1) as non-teaching.
+//         function isBreakPeriod(day, period) {
+//             const periodsCount = getPeriodsForDay(day);
+//             return period >= periodsCount || 
+//                    period === shortBreak - 1 || 
+//                    period === lunchBreak - 1;
+//         }
+
+//         function isTeacherAvailable(teacherId, day, periodNumber) {
+//             // periodNumber is 1-based here
+//             const teacher = teacherMap.get(teacherId);
+//             if (!teacher) return false;
+            
+//             const slotKey = `${day}-${periodNumber}`; // e.g., "Mon-1"
+//             const slot = teacher.unavailability[slotKey];
+            
+//             // If no data, assume available
+//             if (!slot) return true;
+            
+//             // Check if marked as unavailable or already allocated
+//             return !slot.unavailable && !slot.allocated;
+//         }
+
+//         function isLabRoomAvailable(labRoomId, day, periodNumber) {
+//             if (!labRoomId) return true; // Lab room optional
+            
+//             const labRoom = labRoomMap.get(labRoomId);
+//             if (!labRoom) return false;
+            
+//             const slotKey = `${day}-${periodNumber}`;
+//             const slot = labRoom.unavailability[slotKey];
+            
+//             if (!slot) return true;
+//             return !slot.unavailable && !slot.allocated;
+//         }
+
+//         function markTeacherAllocated(teacherId, day, periodNumber) {
+//             const teacher = teacherMap.get(teacherId);
+//             if (teacher) {
+//                 const slotKey = `${day}-${periodNumber}`;
+//                 teacher.unavailability[slotKey] = {
+//                     ...teacher.unavailability[slotKey],
+//                     allocated: true,
+//                     message: 'Teaching class'
+//                 };
+//             }
+//         }
+
+//         function markLabRoomAllocated(labRoomId, day, periodNumber) {
+//             if (!labRoomId) return;
+            
+//             const labRoom = labRoomMap.get(labRoomId);
+//             if (labRoom) {
+//                 const slotKey = `${day}-${periodNumber}`;
+//                 labRoom.unavailability[slotKey] = {
+//                     ...labRoom.unavailability[slotKey],
+//                     allocated: true,
+//                     message: 'In use'
+//                 };
+//             }
+//         }
+
+//         // ================== 5. GENERATE TIMETABLE ==================
+//         const sectionTimetables = {};
+//         let allSectionsSuccessful = true;
+
+//         console.log('\n📋 Generating timetables for each section...');
+
+//         for (let sectionIndex = 0; sectionIndex < sections; sectionIndex++) {
+//             const sectionName = sectionNames[sectionIndex];
+//             console.log(`\n🔹 Processing ${sectionName}...`);
+
+//             // Create empty timetable for this section
+//             const timetable = {};
+//             for (const day of days) {
+//                 timetable[day] = new Array(getPeriodsForDay(day)).fill(null);
+//             }
+
+//             // Clone teacher availability for this section (so sections don't conflict with each other here)
+//             const sectionTeacherMap = new Map();
+//             teacherMap.forEach((teacher, id) => {
+//                 sectionTeacherMap.set(id, {
+//                     ...teacher,
+//                     unavailability: { ...teacher.unavailability }
+//                 });
+//             });
+
+//             const sectionLabRoomMap = new Map();
+//             labRoomMap.forEach((labRoom, id) => {
+//                 sectionLabRoomMap.set(id, {
+//                     ...labRoom,
+//                     unavailability: { ...labRoom.unavailability }
+//                 });
+//             });
+
+//             // === STEP 1: PLACE LABS ===
+//             console.log('  🧪 Placing labs...');
+//             let labsPlacedSuccessfully = true;
+
+//             for (const lab of labs) {
+//                 console.log(`    Lab: ${lab.name} (Frequency: ${lab.frequency})`);
+                
+//                 let placedCount = 0;
+//                 let attempts = 0;
+//                 const maxAttempts = 200;
+
+//                 while (placedCount < lab.frequency && attempts < maxAttempts) {
+//                     attempts++;
+                    
+//                     const randomDay = days[Math.floor(Math.random() * days.length)];
+//                     const periodsCount = getPeriodsForDay(randomDay);
+                    
+//                     if (periodsCount < 2) break;
+                    
+//                     const startPeriodIndex = Math.floor(Math.random() * (periodsCount - 1)); // 0-based
+//                     const p1Index = startPeriodIndex;
+//                     const p2Index = startPeriodIndex + 1;
+//                     const p1Number = p1Index + 1; // 1-based for availability key
+//                     const p2Number = p2Index + 1;
+
+//                     // Do not place on break periods (simple version)
+//                     if (isBreakPeriod(randomDay, p1Index) || isBreakPeriod(randomDay, p2Index)) {
+//                         continue;
+//                     }
+
+//                     // Check slots free in timetable
+//                     if (timetable[randomDay][p1Index] !== null || 
+//                         timetable[randomDay][p2Index] !== null) {
+//                         continue;
+//                     }
+                    
+//                     // Find teacher
+//                     const availableTeacher = lab.teachers.find(teacherId => {
+//                         if (!teacherId || teacherId.trim() === '') return false;
+//                         return isTeacherAvailable(teacherId, randomDay, p1Number) &&
+//                                isTeacherAvailable(teacherId, randomDay, p2Number);
+//                     });
+                    
+//                     if (!availableTeacher) continue;
+
+//                     // Check lab room
+//                     const labRoomId = lab.labRoom;
+//                     if (labRoomId && labRoomId.trim() !== '') {
+//                         if (!isLabRoomAvailable(labRoomId, randomDay, p1Number) ||
+//                             !isLabRoomAvailable(labRoomId, randomDay, p2Number)) {
+//                             continue;
+//                         }
+//                     }
+                    
+//                     // PLACE LAB
+//                     console.log(`      ✅ Placing at ${randomDay} periods ${p1Number}-${p2Number}`);
+                    
+//                     const labEntry = {
+//                         type: 'lab',
+//                         name: lab.name,
+//                         labId: lab.id,
+//                         teacherId: availableTeacher,
+//                         teacherName: sectionTeacherMap.get(availableTeacher)?.name,
+//                         labRoomId: labRoomId || null,
+//                         labRoomName: labRoomId ? sectionLabRoomMap.get(labRoomId)?.labName : null,
+//                         section: sectionName,
+//                         duration: 2
+//                     };
+                    
+//                     timetable[randomDay][p1Index] = labEntry;
+//                     timetable[randomDay][p2Index] = labEntry;
+                    
+//                     // Mark availability
+//                     markTeacherAllocated(availableTeacher, randomDay, p1Number);
+//                     markTeacherAllocated(availableTeacher, randomDay, p2Number);
+                    
+//                     if (labRoomId) {
+//                         markLabRoomAllocated(labRoomId, randomDay, p1Number);
+//                         markLabRoomAllocated(labRoomId, randomDay, p2Number);
+//                     }
+                    
+//                     placedCount++;
+//                 }
+                
+//                 if (placedCount < lab.frequency) {
+//                     console.log(`    ❌ Failed to place lab "${lab.name}" - placed ${placedCount}/${lab.frequency}`);
+//                     labsPlacedSuccessfully = false;
+//                     break;
+//                 }
+//             }
+            
+//             if (!labsPlacedSuccessfully) {
+//                 console.log(`  ❌ Failed to place all labs for ${sectionName}`);
+//                 allSectionsSuccessful = false;
+//                 break;
+//             }
+            
+//             console.log(`  ✅ All labs placed for ${sectionName}`);
+
+//             // === STEP 2: PLACE SUBJECTS ===
+//             console.log('  📚 Placing subjects...');
+//             let subjectsPlacedSuccessfully = true;
+            
+//             const subjectSessions = [];
+//             subjects.forEach(subject => {
+//                 for (let i = 0; i < subject.frequency; i++) {
+//                     subjectSessions.push({
+//                         ...subject,
+//                         sessionId: `${subject.id}-${i}`
+//                     });
+//                 }
+//             });
+            
+//             console.log(`    Need to place ${subjectSessions.length} subject sessions`);
+            
+//             for (const day of days) {
+//                 const periodsCount = getPeriodsForDay(day);
+                
+//                 for (let periodIndex = 0; periodIndex < periodsCount; periodIndex++) {
+//                     if (timetable[day][periodIndex] !== null || isBreakPeriod(day, periodIndex)) {
+//                         continue;
+//                     }
+
+//                     const periodNumber = periodIndex + 1;
+
+//                     for (let i = 0; i < subjectSessions.length; i++) {
+//                         const subject = subjectSessions[i];
+                        
+//                         const availableTeacher = subject.teachers.find(teacherId => {
+//                             if (!teacherId || teacherId.trim() === '') return false;
+//                             return isTeacherAvailable(teacherId, day, periodNumber);
+//                         });
+                        
+//                         if (availableTeacher) {
+//                             console.log(`      ✅ Placing ${subject.name} at ${day} period ${periodNumber}`);
+                            
+//                             timetable[day][periodIndex] = {
+//                                 type: 'subject',
+//                                 name: subject.name,
+//                                 subjectId: subject.id,
+//                                 teacherId: availableTeacher,
+//                                 teacherName: sectionTeacherMap.get(availableTeacher)?.name,
+//                                 section: sectionName,
+//                                 duration: 1
+//                             };
+                            
+//                             markTeacherAllocated(availableTeacher, day, periodNumber);
+//                             subjectSessions.splice(i, 1);
+//                             break;
+//                         }
+//                     }
+                    
+//                     if (subjectSessions.length === 0) break;
+//                 }
+//                 if (subjectSessions.length === 0) break;
+//             }
+            
+//             if (subjectSessions.length > 0) {
+//                 console.log(`    ⚠️ Could not place ${subjectSessions.length} subjects`);
+//                 console.log('    Unplaced subjects:', subjectSessions.map(s => s.name));
+//                 subjectsPlacedSuccessfully = false;
+//             } else {
+//                 console.log(`  ✅ All subjects placed for ${sectionName}`);
+//             }
+            
+//             if (!subjectsPlacedSuccessfully) {
+//                 allSectionsSuccessful = false;
+//                 break;
+//             }
+            
+//             sectionTimetables[sectionName] = timetable;
+//             console.log(`🎉 Completed timetable for ${sectionName}`);
+//         }
+
+//         // ================== 6. RETURN RESULTS ==================
+//         if (!allSectionsSuccessful) {
+//             return {
+//                 success: false,
+//                 error: "Could not generate complete timetable for all sections. Try reducing frequencies or adding more teachers.",
+//                 sectionTimetables: null,
+//                 debugInfo: {
+//                     days,
+//                     periods: weekdayPeriods,
+//                     sections,
+//                     totalSubjects: subjects.reduce((sum, s) => sum + s.frequency, 0),
+//                     totalLabs: labs.reduce((sum, l) => sum + l.frequency, 0),
+//                     totalFaculty: validFaculty.length
+//                 }
+//             };
+//         }
+
+//         // Stats
+//         let totalPeriodsScheduled = 0;
+//         Object.values(sectionTimetables).forEach(timetable => {
+//             Object.values(timetable).forEach(daySlots => {
+//                 totalPeriodsScheduled += daySlots.filter(slot => slot !== null).length;
+//             });
+//         });
+
+//         const result = {
+//             success: true,
+//             config: {
+//                 instituteId: config.instituteId,
+//                 branchId: config.branchId,
+//                 semesterId: config.semesterId,
+//                 days,
+//                 weekdayPeriods,
+//                 saturdayPeriods,
+//                 shortBreak,
+//                 lunchBreak
+//             },
+//             sectionTimetables,
+//             statistics: {
+//                 sections: sections,
+//                 totalPeriodsScheduled,
+//                 totalSubjects: subjects.reduce((sum, s) => sum + s.frequency, 0),
+//                 totalLabs: labs.reduce((sum, l) => sum + l.frequency, 0),
+//                 utilization: Math.round((totalPeriodsScheduled / (sections * days.length * weekdayPeriods)) * 100) + '%'
+//             },
+//             generatedAt: new Date().toISOString()
+//         };
+
+//         console.log('\n==========================================');
+//         console.log('🎉 TIMETABLE GENERATION COMPLETE!');
+//         console.log('==========================================');
+//         console.log('📊 Statistics:', result.statistics);
+
+//         return result;
+
+//     } catch (error) {
+//         console.error('❌ Error in timetable generation:', error);
+//         return {
+//             success: false,
+//             error: `Unexpected error: ${error.message}`,
+//             sectionTimetables: null,
+//             stack: error.stack
+//         };
+//     }
+// }
+
+// export async function generateTimetableForSections(config, facultyData, labRoomsData, branchData) {
+//     console.log('🚀 Starting SIMPLIFIED timetable generation...');
+
+//     try {
+//         // ================== 1. PARSE INPUT DATA ==================
+//         const days = config.saturdayPeriods > 0 
+//             ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] 
+//             : ["Mon", "Tue", "Wed", "Thu", "Fri"];
+        
+//         const weekdayPeriods = config.weekdayPeriods || 6;
+//         const saturdayPeriods = config.saturdayPeriods || 0;
+//         const shortBreak = config.shortBreakAfter || 2;
+//         const lunchBreak = config.lunchBreakAfter || 4;
+        
+//         const sections = parseInt(branchData.sections) || 1;
+//         const sectionNames = branchData.sectionNames || 
+//             Array.from({length: sections}, (_, i) => `Section ${String.fromCharCode(65 + i)}`);
+        
+//         const subjects = config.subjects || [];
+//         const labs = config.labs || [];
+
+//         console.log('📊 Summary:', {
+//             days,
+//             weekdayPeriods,
+//             saturdayPeriods,
+//             shortBreak,
+//             lunchBreak,
+//             sections,
+//             sectionNames,
+//             subjectCount: subjects.length,
+//             labCount: labs.length,
+//             facultyCount: facultyData.length,
+//             labRoomCount: labRoomsData.length
+//         });
+
+//         // ================== 2. VALIDATE DATA ==================
+//         // Validate subjects
+//         for (const subject of subjects) {
+//             if (!subject.name || subject.name.trim() === '') {
+//                 return {
+//                     success: false,
+//                     error: `Subject missing name. All subjects must have names.`
+//                 };
+//             }
+//             if (!subject.teachers || subject.teachers.length === 0) {
+//                 return {
+//                     success: false,
+//                     error: `Subject "${subject.name}" has no teachers assigned.`
+//                 };
+//             }
+//             if (subject.frequency < 1) {
+//                 return {
+//                     success: false,
+//                     error: `Subject "${subject.name}" frequency must be at least 1.`
+//                 };
+//             }
+//         }
+
+//         // Validate labs
+//         for (const lab of labs) {
+//             if (!lab.name || lab.name.trim() === '') {
+//                 return {
+//                     success: false,
+//                     error: `Lab missing name. All labs must have names.`
+//                 };
+//             }
+//             if (!lab.teachers || lab.teachers.length === 0) {
+//                 return {
+//                     success: false,
+//                     error: `Lab "${lab.name}" has no teachers assigned.`
+//                 };
+//             }
+//             if (lab.frequency < 1) {
+//                 return {
+//                     success: false,
+//                     error: `Lab "${lab.name}" frequency must be at least 1.`
+//                 };
+//             }
+//         }
+
+//         // Validate faculty
+//         const validFaculty = facultyData.filter(teacher => 
+//             teacher && teacher.teacherId && teacher.name
+//         );
+//         if (validFaculty.length === 0) {
+//             return {
+//                 success: false,
+//                 error: `No valid faculty data found. Please add teachers first.`
+//             };
+//         }
+
+//         // ================== 3. CREATE DATA STRUCTURES ==================
+//         // Teacher map for quick access
+//         const teacherMap = new Map();
+//         validFaculty.forEach(teacher => {
+//             teacherMap.set(teacher.teacherId, {
+//                 ...teacher,
+//                 // Ensure unavailability exists
+//                 unavailability: teacher.unavailability || {}
+//             });
+//         });
+
+//         // Lab room map
+//         const labRoomMap = new Map();
+//         labRoomsData.forEach(labRoom => {
+//             labRoomMap.set(labRoom.labId, {
+//                 ...labRoom,
+//                 unavailability: labRoom.unavailability || {}
+//             });
+//         });
+
+//         // ================== 4. HELPER FUNCTIONS ==================
+//         function getPeriodsForDay(day) {
+//             return day === "Sat" ? saturdayPeriods : weekdayPeriods;
+//         }
+
+//         function isBreakPeriod(day, period) {
+//             const periodsCount = getPeriodsForDay(day);
+//             return period >= periodsCount || 
+//                    period === shortBreak - 1 || 
+//                    period === lunchBreak - 1;
+//         }
+
+//         function isTeacherAvailable(teacherId, day, period) {
+//             const teacher = teacherMap.get(teacherId);
+//             if (!teacher) return false;
+            
+//             const slotKey = `${day}-${period}`;
+//             const slot = teacher.unavailability[slotKey];
+            
+//             // If no data, assume available
+//             if (!slot) return true;
+            
+//             // Check if marked as unavailable or already allocated
+//             return !slot.unavailable && !slot.allocated;
+//         }
+
+//         function isLabRoomAvailable(labRoomId, day, period) {
+//             if (!labRoomId) return true; // Lab room optional
+            
+//             const labRoom = labRoomMap.get(labRoomId);
+//             if (!labRoom) return false;
+            
+//             const slotKey = `${day}-${period}`;
+//             const slot = labRoom.unavailability[slotKey];
+            
+//             if (!slot) return true;
+//             return !slot.unavailable && !slot.allocated;
+//         }
+
+//         function markTeacherAllocated(teacherId, day, period) {
+//             const teacher = teacherMap.get(teacherId);
+//             if (teacher) {
+//                 const slotKey = `${day}-${period}`;
+//                 teacher.unavailability[slotKey] = {
+//                     ...teacher.unavailability[slotKey],
+//                     allocated: true,
+//                     message: 'Teaching class'
+//                 };
+//             }
+//         }
+
+//         function markLabRoomAllocated(labRoomId, day, period) {
+//             if (!labRoomId) return;
+            
+//             const labRoom = labRoomMap.get(labRoomId);
+//             if (labRoom) {
+//                 const slotKey = `${day}-${period}`;
+//                 labRoom.unavailability[slotKey] = {
+//                     ...labRoom.unavailability[slotKey],
+//                     allocated: true,
+//                     message: 'In use'
+//                 };
+//             }
+//         }
+
+//         // ================== 5. GENERATE TIMETABLE ==================
+//         const sectionTimetables = {};
+//         let allSectionsSuccessful = true;
+
+//         console.log('\n📋 Generating timetables for each section...');
+
+//         for (let sectionIndex = 0; sectionIndex < sections; sectionIndex++) {
+//             const sectionName = sectionNames[sectionIndex];
+//             console.log(`\n🔹 Processing ${sectionName}...`);
+
+//             // Create empty timetable for this section
+//             const timetable = {};
+//             for (const day of days) {
+//                 timetable[day] = new Array(getPeriodsForDay(day)).fill(null);
+//             }
+
+//             // Reset teacher availability for this section
+//             // (We'll create a fresh copy for each section)
+//             const sectionTeacherMap = new Map();
+//             teacherMap.forEach((teacher, id) => {
+//                 sectionTeacherMap.set(id, {
+//                     ...teacher,
+//                     unavailability: { ...teacher.unavailability } // Shallow copy
+//                 });
+//             });
+
+//             const sectionLabRoomMap = new Map();
+//             labRoomMap.forEach((labRoom, id) => {
+//                 sectionLabRoomMap.set(id, {
+//                     ...labRoom,
+//                     unavailability: { ...labRoom.unavailability }
+//                 });
+//             });
+
+//             // === STEP 1: PLACE LABS ===
+//             console.log('  🧪 Placing labs...');
+//             let labsPlacedSuccessfully = true;
+
+//             for (const lab of labs) {
+//                 console.log(`    Lab: ${lab.name} (Frequency: ${lab.frequency})`);
+                
+//                 let placedCount = 0;
+//                 let attempts = 0;
+//                 const maxAttempts = 200;
+
+//                 while (placedCount < lab.frequency && attempts < maxAttempts) {
+//                     attempts++;
+                    
+//                     // Try random day and period
+//                     const randomDay = days[Math.floor(Math.random() * days.length)];
+//                     const periodsCount = getPeriodsForDay(randomDay);
+                    
+//                     // We need 2 consecutive periods for lab
+//                     if (periodsCount < 2) {
+//                         console.log(`      ❌ Not enough periods on ${randomDay} for lab`);
+//                         break;
+//                     }
+                    
+//                     // Try random starting period (0 to periodsCount-2)
+//                     const startPeriod = Math.floor(Math.random() * (periodsCount - 1));
+                    
+//                     // Check constraints
+//                     if (isBreakPeriod(randomDay, startPeriod) || 
+//                         isBreakPeriod(randomDay, startPeriod + 1)) {
+//                         continue;
+//                     }
+                    
+//                     // Check if slots are free
+//                     if (timetable[randomDay][startPeriod] !== null || 
+//                         timetable[randomDay][startPeriod + 1] !== null) {
+//                         continue;
+//                     }
+                    
+//                     // Check teacher availability
+//                     const availableTeacher = lab.teachers.find(teacherId => {
+//                         if (!teacherId || teacherId.trim() === '') return false;
+                        
+//                         const teacher = sectionTeacherMap.get(teacherId);
+//                         if (!teacher) {
+//                             console.log(`      ❌ Teacher ${teacherId} not found`);
+//                             return false;
+//                         }
+                        
+//                         return isTeacherAvailable(teacherId, randomDay, startPeriod + 1) &&
+//                                isTeacherAvailable(teacherId, randomDay, startPeriod + 2);
+//                     });
+                    
+//                     if (!availableTeacher) {
+//                         continue;
+//                     }
+                    
+//                     // Check lab room availability (optional)
+//                     const labRoomId = lab.labRoom;
+//                     if (labRoomId && labRoomId.trim() !== '') {
+//                         const labRoom = sectionLabRoomMap.get(labRoomId);
+//                         if (!labRoom) {
+//                             console.log(`      ❌ Lab room ${labRoomId} not found`);
+//                             continue;
+//                         }
+                        
+//                         if (!isLabRoomAvailable(labRoomId, randomDay, startPeriod + 1) ||
+//                             !isLabRoomAvailable(labRoomId, randomDay, startPeriod + 2)) {
+//                             continue;
+//                         }
+//                     }
+                    
+//                     // PLACE THE LAB
+//                     console.log(`      ✅ Placing at ${randomDay} periods ${startPeriod + 1}-${startPeriod + 2}`);
+                    
+//                     const labEntry = {
+//                         type: 'lab',
+//                         name: lab.name,
+//                         labId: lab.id,
+//                         teacherId: availableTeacher,
+//                         teacherName: sectionTeacherMap.get(availableTeacher)?.name,
+//                         labRoomId: labRoomId || null,
+//                         labRoomName: labRoomId ? sectionLabRoomMap.get(labRoomId)?.labName : null,
+//                         section: sectionName,
+//                         duration: 2
+//                     };
+                    
+//                     // Mark both periods
+//                     timetable[randomDay][startPeriod] = labEntry;
+//                     timetable[randomDay][startPeriod + 1] = labEntry;
+                    
+//                     // Mark teacher and lab room as allocated
+//                     markTeacherAllocated(availableTeacher, randomDay, startPeriod + 1);
+//                     markTeacherAllocated(availableTeacher, randomDay, startPeriod + 2);
+                    
+//                     if (labRoomId) {
+//                         markLabRoomAllocated(labRoomId, randomDay, startPeriod + 1);
+//                         markLabRoomAllocated(labRoomId, randomDay, startPeriod + 2);
+//                     }
+                    
+//                     placedCount++;
+//                 }
+                
+//                 if (placedCount < lab.frequency) {
+//                     console.log(`    ❌ Failed to place lab "${lab.name}" - placed ${placedCount}/${lab.frequency}`);
+//                     labsPlacedSuccessfully = false;
+//                     break;
+//                 }
+//             }
+            
+//             if (!labsPlacedSuccessfully) {
+//                 console.log(`  ❌ Failed to place all labs for ${sectionName}`);
+//                 allSectionsSuccessful = false;
+//                 break;
+//             }
+            
+//             console.log(`  ✅ All labs placed for ${sectionName}`);
+
+//             // === STEP 2: PLACE SUBJECTS ===
+//             console.log('  📚 Placing subjects...');
+//             let subjectsPlacedSuccessfully = true;
+            
+//             // Create list of all subject sessions needed
+//             const subjectSessions = [];
+//             subjects.forEach(subject => {
+//                 for (let i = 0; i < subject.frequency; i++) {
+//                     subjectSessions.push({
+//                         ...subject,
+//                         sessionId: `${subject.id}-${i}`
+//                     });
+//                 }
+//             });
+            
+//             console.log(`    Need to place ${subjectSessions.length} subject sessions`);
+            
+//             // Simple algorithm: try each available slot
+//             for (const day of days) {
+//                 const periodsCount = getPeriodsForDay(day);
+                
+//                 for (let period = 0; period < periodsCount; period++) {
+//                     // Skip if slot is occupied or break period
+//                     if (timetable[day][period] !== null || isBreakPeriod(day, period)) {
+//                         continue;
+//                     }
+                    
+//                     // Try to find a subject that fits
+//                     for (let i = 0; i < subjectSessions.length; i++) {
+//                         const subject = subjectSessions[i];
+                        
+//                         // Find an available teacher for this subject
+//                         const availableTeacher = subject.teachers.find(teacherId => {
+//                             if (!teacherId || teacherId.trim() === '') return false;
+//                             return isTeacherAvailable(teacherId, day, period + 1);
+//                         });
+                        
+//                         if (availableTeacher) {
+//                             // Place the subject
+//                             console.log(`      ✅ Placing ${subject.name} at ${day} period ${period + 1}`);
+                            
+//                             timetable[day][period] = {
+//                                 type: 'subject',
+//                                 name: subject.name,
+//                                 subjectId: subject.id,
+//                                 teacherId: availableTeacher,
+//                                 teacherName: sectionTeacherMap.get(availableTeacher)?.name,
+//                                 section: sectionName,
+//                                 duration: 1
+//                             };
+                            
+//                             // Mark teacher as allocated
+//                             markTeacherAllocated(availableTeacher, day, period + 1);
+                            
+//                             // Remove from pending sessions
+//                             subjectSessions.splice(i, 1);
+//                             break;
+//                         }
+//                     }
+                    
+//                     if (subjectSessions.length === 0) break;
+//                 }
+//                 if (subjectSessions.length === 0) break;
+//             }
+            
+//             // If we still have subjects left, try more aggressively
+//             if (subjectSessions.length > 0) {
+//                 console.log(`    ${subjectSessions.length} subjects remaining, trying alternative placement...`);
+                
+//                 // Try all possible slots again, including checking if we can move things around
+//                 for (const day of days) {
+//                     const periodsCount = getPeriodsForDay(day);
+                    
+//                     for (let period = 0; period < periodsCount; period++) {
+//                         if (timetable[day][period] === null && !isBreakPeriod(day, period)) {
+//                             // This is an empty slot, try to place any subject
+//                             for (let i = 0; i < subjectSessions.length; i++) {
+//                                 const subject = subjectSessions[i];
+//                                 const availableTeacher = subject.teachers.find(teacherId => 
+//                                     teacherId && isTeacherAvailable(teacherId, day, period + 1)
+//                                 );
+                                
+//                                 if (availableTeacher) {
+//                                     timetable[day][period] = {
+//                                         type: 'subject',
+//                                         name: subject.name,
+//                                         subjectId: subject.id,
+//                                         teacherId: availableTeacher,
+//                                         teacherName: sectionTeacherMap.get(availableTeacher)?.name,
+//                                         section: sectionName,
+//                                         duration: 1
+//                                     };
+                                    
+//                                     markTeacherAllocated(availableTeacher, day, period + 1);
+//                                     subjectSessions.splice(i, 1);
+//                                     console.log(`      ✅ Placed remaining ${subject.name} at ${day} period ${period + 1}`);
+//                                     break;
+//                                 }
+//                             }
+//                         }
+//                         if (subjectSessions.length === 0) break;
+//                     }
+//                     if (subjectSessions.length === 0) break;
+//                 }
+//             }
+            
+//             if (subjectSessions.length > 0) {
+//                 console.log(`    ⚠️ Could not place ${subjectSessions.length} subjects`);
+//                 console.log('    Unplaced subjects:', subjectSessions.map(s => s.name));
+//                 subjectsPlacedSuccessfully = false;
+//             } else {
+//                 console.log(`  ✅ All subjects placed for ${sectionName}`);
+//             }
+            
+//             if (!subjectsPlacedSuccessfully) {
+//                 allSectionsSuccessful = false;
+//                 break;
+//             }
+            
+//             // Save this section's timetable
+//             sectionTimetables[sectionName] = timetable;
+//             console.log(`🎉 Completed timetable for ${sectionName}`);
+//         }
+
+//         // ================== 6. RETURN RESULTS ==================
+//         if (!allSectionsSuccessful) {
+//             return {
+//                 success: false,
+//                 error: "Could not generate complete timetable for all sections. Try reducing frequencies or adding more teachers.",
+//                 sectionTimetables: null,
+//                 debugInfo: {
+//                     days,
+//                     periods: weekdayPeriods,
+//                     sections,
+//                     totalSubjects: subjects.reduce((sum, s) => sum + s.frequency, 0),
+//                     totalLabs: labs.reduce((sum, l) => sum + l.frequency, 0),
+//                     totalFaculty: validFaculty.length
+//                 }
+//             };
+//         }
+
+//         // Calculate statistics
+//         let totalPeriodsScheduled = 0;
+//         Object.values(sectionTimetables).forEach(timetable => {
+//             Object.values(timetable).forEach(daySlots => {
+//                 totalPeriodsScheduled += daySlots.filter(slot => slot !== null).length;
+//             });
+//         });
+
+//         const result = {
+//             success: true,
+//             config: {
+//                 instituteId: config.instituteId,
+//                 branchId: config.branchId,
+//                 semesterId: config.semesterId,
+//                 days,
+//                 weekdayPeriods,
+//                 saturdayPeriods,
+//                 shortBreak,
+//                 lunchBreak
+//             },
+//             sectionTimetables,
+//             statistics: {
+//                 sections: sections,
+//                 totalPeriodsScheduled,
+//                 totalSubjects: subjects.reduce((sum, s) => sum + s.frequency, 0),
+//                 totalLabs: labs.reduce((sum, l) => sum + l.frequency, 0),
+//                 utilization: Math.round((totalPeriodsScheduled / (sections * days.length * weekdayPeriods)) * 100) + '%'
+//             },
+//             generatedAt: new Date().toISOString()
+//         };
+
+//         console.log('\n==========================================');
+//         console.log('🎉 TIMETABLE GENERATION COMPLETE!');
+//         console.log('==========================================');
+//         console.log('📊 Statistics:', result.statistics);
+        
+//         // Log sample timetable
+//         const firstSection = sectionNames[0];
+//         if (sectionTimetables[firstSection]) {
+//             console.log('\n📅 Sample timetable (Monday - First Section):');
+//             const mondaySlots = sectionTimetables[firstSection].Mon || [];
+//             mondaySlots.forEach((slot, index) => {
+//                 if (slot) {
+//                     console.log(`  Period ${index + 1}: ${slot.type === 'subject' ? '📚' : '🧪'} ${slot.name} - ${slot.teacherName}`);
+//                 } else {
+//                     console.log(`  Period ${index + 1}: Free`);
+//                 }
+//             });
+//         }
+
+//         return result;
+
+//     } catch (error) {
+//         console.error('❌ Error in timetable generation:', error);
+//         return {
+//             success: false,
+//             error: `Unexpected error: ${error.message}`,
+//             sectionTimetables: null,
+//             stack: error.stack
+//         };
+//     }
+// }
 
 // 'use client';
 
